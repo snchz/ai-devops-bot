@@ -139,6 +139,15 @@ class TelegramClient:
 
     async def poll_updates(self):
         """Asynchronously polls Telegram for callback updates to execute interactive self-healing."""
+        logger.info("Eliminando posibles webhooks activos en Telegram para evitar conflictos de comunicación...")
+        url_del = f"https://api.telegram.org/bot{self.token}/deleteWebhook"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(url_del, json={"drop_pending_updates": False})
+            logger.info("Limpieza de webhooks completada con éxito.")
+        except Exception as e:
+            logger.warning(f"No se pudo eliminar el webhook de Telegram (omitido): {e}")
+
         logger.info("Iniciando servicio de long polling para recibir interacciones de Telegram...")
         offset = 0
         url = f"https://api.telegram.org/bot{self.token}/getUpdates"
