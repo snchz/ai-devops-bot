@@ -68,7 +68,8 @@ LOKI_URL=http://192.168.0.5:3100
 LOKI_USER=
 LOKI_PASSWORD=
 # Opcional: Query personalizada de Loki (Excluye por defecto al bot y a Loki para evitar bucles)
-# LOKI_QUERY={job=~".+", container_name!="ai-devops-bot", container_name!="loki"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"
+# LOKI_QUERY={job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"
+
 
 # Configuración de la Inteligencia Artificial (Groq API)
 # Puedes usar tanto GROQ_API_KEY como GEMINI_API_KEY

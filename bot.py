@@ -7,6 +7,7 @@ via Groq (EU-compatible, 100% free), and sends actionable solutions to Telegram.
 
 Features:
 - Application-based grouping and log deduplication with repetition counters (xN).
+- ANSI color escape code stripping for crystal-clear Telegram format and perfect deduplication.
 - Real-time Knowledge Base RAG (knowledge_base.json) for custom troubleshooting injection.
 - Complete try-except resiliency to network and API drops.
 
@@ -19,6 +20,7 @@ import time
 import logging
 import sys
 import json
+import re
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
@@ -56,8 +58,8 @@ class Config:
         self.loki_password = os.getenv("LOKI_PASSWORD", None)
         
         # Loki Query: default matches errors, fatals, and panics across non-empty jobs
-        # Intelligent default ignores the bot's own logs and Loki's internal metric logs to prevent self-loops
-        self.loki_query = os.getenv("LOKI_QUERY", '{job=~".+", container_name!="ai-devops-bot", container_name!="loki"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"')
+        # Excludes the bot itself, Loki, and duplicate internal_logs to prevent duplicate logging
+        self.loki_query = os.getenv("LOKI_QUERY", '{job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"')
         
         # IA (Groq) Configuration
         self.groq_api_key = os.getenv("GROQ_API_KEY", os.getenv("GEMINI_API_KEY", ""))
@@ -139,10 +141,13 @@ class LokiClient:
                         ts_sec = ts_ns / 1_000_000_000
                         dt = datetime.fromtimestamp(ts_sec, tz=timezone.utc)
                         
+                        # Strip ANSI color escape codes to make it readable and allow perfect deduplication
+                        clean_message = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', log_message.strip())
+                        
                         all_logs.append({
                             "timestamp_ns": ts_ns,
                             "labels": stream_labels,
-                            "message": log_message.strip(),
+                            "message": clean_message,
                             "datetime": dt.strftime("%Y-%m-%d %H:%M:%S UTC")
                         })
                     except (ValueError, IndexError) as err:
