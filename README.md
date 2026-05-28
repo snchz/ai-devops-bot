@@ -22,16 +22,17 @@ A **Senior DevOps** production-grade tool designed to intelligently monitor logs
 
 ```mermaid
 graph TD
-    A[Local Git Commit & Push] -->|1. Push to main| B[GitHub Actions CI/CD]
-    B -->|2. Build & publish| C[GitHub Container Registry (GHCR)]
-    D[Your Server: Watchtower] -->|3. Scan changes in GHCR| C
-    C -.->|4. Auto-update image & start| E[Dockge Stack: ai-devops-bot]
-    F[Grafana Loki] -->|5. Poll every X sec| E
+    A["Local Git Commit & Push"] -->|1. Push to main| B["GitHub Actions CI/CD"]
+    B -->|2. Build & publish| C["GitHub Container Registry (GHCR)"]
+    D["Your Server: Watchtower"] -->|3. Scan changes in GHCR| C
+    C -.->|4. Auto-update image & start| E["Dockge Stack: ai-devops-bot"]
+    F["Grafana Loki"] -->|5. Poll every X sec| E
     E -->|6. Filter duplicates & self-loops| E
-    E -->|7. Batch Diagnostic Prompt| G[Groq API Llama 3.3]
+    E -->|7. Batch Diagnostic Prompt| G["Groq API Llama 3.3"]
     G -->|8. Solution & console commands| E
-    E -->|9. Markdown Notification| H[Telegram API]
+    E -->|9. Markdown Notification| H["Telegram API"]
 ```
+
 
 1.  **Continuous Integration (CI)**: When you push to the `main` branch, a GitHub Action automatically builds the `Dockerfile` and publishes the image securely (credentials-free) to GitHub Container Registry (GHCR).
 2.  **Continuous Deployment (CD)**: Your server's **Watchtower** container scans GHCR, automatically downloads the new image in the background, and restarts the bot with zero manual downtime.
@@ -208,16 +209,17 @@ Una herramienta de nivel **Senior DevOps** diseñada para monitorizar de forma i
 
 ```mermaid
 graph TD
-    A[Local Git Commit & Push] -->|1. Push to main| B[GitHub Actions CI/CD]
-    B -->|2. Compila y publica| C[GitHub Container Registry (GHCR)]
-    D[Tu Servidor: Watchtower] -->|3. Escanea cambios en GHCR| C
-    C -.->|4. Actualiza imagen e inicia| E[Stack de Dockge: ai-devops-bot]
-    F[Grafana Loki] -->|5. Sondeo cada X seg| E
+    A["Local Git Commit & Push"] -->|1. Push to main| B["GitHub Actions CI/CD"]
+    B -->|2. Compila y publica| C["GitHub Container Registry (GHCR)"]
+    D["Tu Servidor: Watchtower"] -->|3. Escanea cambios en GHCR| C
+    C -.->|4. Actualiza imagen e inicia| E["Stack de Dockge: ai-devops-bot"]
+    F["Grafana Loki"] -->|5. Sondeo cada X seg| E
     E -->|6. Filtra duplicados y auto-bucles| E
-    E -->|7. Diagnóstico en Lote| G[Groq API Llama 3.3]
+    E -->|7. Diagnóstico en Lote| G["Groq API Llama 3.3"]
     G -->|8. Solución e instrucciones| E
-    E -->|9. Notificación en Markdown| H[Telegram API]
+    E -->|9. Notificación en Markdown| H["Telegram API"]
 ```
+
 
 1.  **Integración Continua (CI)**: Cada vez que haces un `git push` a `main`, una GitHub Action compila el `Dockerfile` y publica la imagen en `ghcr.io` como pública de forma segura (sin credenciales).
 2.  **Despliegue Continuo (CD)**: Tu contenedor **Watchtower** escanea el registro, descarga la nueva imagen al vuelo y reinicia el bot de forma transparente y automática.
