@@ -47,8 +47,10 @@ El proyecto consta de la siguiente estructura limpia de archivos:
 1.  **[`bot.py`](file:///d:/Aplicaciones/ai-devops-bot/bot.py)**: El script principal modular con control robusto de errores, reintentos y deduplicación.
 2.  **[`requirements.txt`](file:///d:/Aplicaciones/ai-devops-bot/requirements.txt)**: Lista minimalista de requerimientos para Python.
 3.  **[`Dockerfile`](file:///d:/Aplicaciones/ai-devops-bot/Dockerfile)**: Dockerfile seguro y optimizado con ejecución no root.
-4.  **[`.env.example`](file:///d:/Aplicaciones/ai-devops-bot/.env.example)**: Plantilla con los campos de configuración vacíos.
-5.  **[`README.md`](file:///d:/Aplicaciones/ai-devops-bot/README.md)**: Esta documentación completa del proyecto.
+4.  **[`docker-compose.yml`](file:///d:/Aplicaciones/ai-devops-bot/docker-compose.yml)**: Configuración lista para orquestar y desplegar con Dockge o docker-compose.
+5.  **[`.env.example`](file:///d:/Aplicaciones/ai-devops-bot/.env.example)**: Plantilla con los campos de configuración vacíos.
+6.  **[`README.md`](file:///d:/Aplicaciones/ai-devops-bot/README.md)**: Esta documentación completa del proyecto.
+
 
 ---
 
