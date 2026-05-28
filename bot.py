@@ -3,7 +3,12 @@
 AI Log Monitor & Analyzer Bot
 ------------------------------
 Monitors Grafana Loki for errors, analyzes them with Meta Llama 3.3 (70B)
-via the ultra-fast Groq API (100% free and EU-compatible), and alerts Telegram.
+via Groq (EU-compatible, 100% free), and sends actionable solutions to Telegram.
+
+Features:
+- Application-based grouping and log deduplication with repetition counters (xN).
+- Real-time Knowledge Base RAG (knowledge_base.json) for custom troubleshooting injection.
+- Complete try-except resiliency to network and API drops.
 
 Author: Senior DevOps & Python Developer
 Language: Python 3.11+
@@ -13,6 +18,7 @@ import os
 import time
 import logging
 import sys
+import json
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
@@ -49,12 +55,11 @@ class Config:
         self.loki_user = os.getenv("LOKI_USER", None)
         self.loki_password = os.getenv("LOKI_PASSWORD", None)
         
-        # Loki Query: default matches errors, fatals, and panics but excludes the bot and loki to prevent self-loops
+        # Loki Query: default matches errors, fatals, and panics across non-empty jobs
+        # Intelligent default ignores the bot's own logs and Loki's internal metric logs to prevent self-loops
         self.loki_query = os.getenv("LOKI_QUERY", '{job=~".+", container_name!="ai-devops-bot", container_name!="loki"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"')
-
         
         # IA (Groq) Configuration
-        # Backwards compatible: load from GROQ_API_KEY or fallback to GEMINI_API_KEY to avoid forcing .env renames
         self.groq_api_key = os.getenv("GROQ_API_KEY", os.getenv("GEMINI_API_KEY", ""))
         if not self.groq_api_key:
             raise ValueError("GROQ_API_KEY (o GEMINI_API_KEY con tu clave gsk_ de Groq) es obligatorio.")
@@ -81,6 +86,9 @@ class Config:
             logger.warning("POLL_INTERVAL_SECONDS no es un número válido. Usando valor por defecto: 60s")
             self.poll_interval = 60
 
+        # Knowledge Base path
+        self.kb_path = os.getenv("KNOWLEDGE_BASE_PATH", "knowledge_base.json")
+
 
 class LokiClient:
     """Client to query Grafana Loki HTTP API."""
@@ -92,7 +100,7 @@ class LokiClient:
         if config.loki_user and config.loki_password:
             self.auth = (config.loki_user, config.loki_password)
             
-    def fetch_logs(self, start_ns: Optional[int] = None, limit: int = 250) -> List[Dict[str, Any]]:
+    def fetch_logs(self, start_ns: Optional[int] = None, limit: int = 500) -> List[Dict[str, Any]]:
         """Queries /loki/api/v1/query_range."""
         url = f"{self.base_url}/loki/api/v1/query_range"
         
@@ -152,8 +160,53 @@ class LokiClient:
             return []
 
 
+class KnowledgeBase:
+    """Manages local RAG rules loaded dynamically from a JSON file."""
+    
+    def __init__(self, path: str):
+        self.path = path
+        
+    def load_rules(self) -> List[Dict[str, Any]]:
+        """Loads and returns troubleshooting rules from JSON file in real-time."""
+        if not os.path.exists(self.path):
+            logger.debug(f"Base de conocimientos {self.path} no encontrada. Retornando lista vacía.")
+            return []
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error al leer base de conocimientos en {self.path}: {e}")
+            return []
+            
+    def match_logs(self, unique_logs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Matches unique error log messages against active patterns.
+        Returns a list of matched rule definitions.
+        """
+        rules = self.load_rules()
+        if not rules:
+            return []
+            
+        matched_rules = []
+        matched_patterns = set()
+        
+        for log in unique_logs:
+            msg_lower = log["message"].lower()
+            for rule in rules:
+                pattern = rule.get("pattern", "").lower()
+                if not pattern:
+                    continue
+                # If substring matches and hasn't been matched yet in this cycle
+                if pattern in msg_lower and pattern not in matched_patterns:
+                    matched_rules.append(rule)
+                    matched_patterns.add(pattern)
+                    logger.info(f"💡 [CONOCIMIENTO ENCONTRADO] El log coincide con el patrón: '{rule['pattern']}'")
+                    
+        return matched_rules
+
+
 class GeminiClient:
-    """Client to interact with Groq API using Llama 3.3 70B."""
+    """Client to interact with Groq API using Llama 3.3 70B with RAG capabilities."""
     
     def __init__(self, config: Config):
         self.api_key = config.groq_api_key
@@ -181,30 +234,46 @@ class GeminiClient:
         )
         logger.info(f"Cliente de Inteligencia Artificial (Groq) inicializado con el modelo {self.model_name}.")
 
-    def analyze_logs(self, logs: List[Dict[str, Any]]) -> Optional[str]:
-        """Sends logs to Groq for diagnostic analysis."""
+    def analyze_logs(self, grouped_logs: Dict[str, List[Dict[str, Any]]], matched_rules: List[Dict[str, Any]]) -> Optional[str]:
+        """Sends grouped logs and custom injected solutions to Groq for analysis."""
         if not self.api_key:
             logger.error("API Key de Groq vacía. Saltando análisis.")
             return None
             
-        # Format the log collection into a clear, structured prompt
+        # Format the log collection into a clean, structured prompt
         prompt_lines = [
-            f"Se han detectado los siguientes {len(logs)} logs de error en el sistema para tu análisis y resolución:\n"
+            "Se han detectado los siguientes logs de error agrupados por contenedor en el sistema:\n"
         ]
         
-        for idx, log in enumerate(logs, 1):
-            job = log["labels"].get("job", "desconocido")
+        for app, items in grouped_logs.items():
+            prompt_lines.append(f"📦 [Contenedor / App: {app}]")
+            for idx, item in enumerate(items, 1):
+                prompt_lines.append(
+                    f"  Log #{idx} (ocurrencias en este ciclo: {item['count']}):\n"
+                    f"  Fecha: {item['datetime']}\n"
+                    f"  Mensaje original:\n  {item['message']}\n"
+                )
+            prompt_lines.append("-" * 30 + "\n")
+            
+        # Inject custom knowledge rules if found
+        if matched_rules:
             prompt_lines.append(
-                f"--- ERROR #{idx} ---\n"
-                f"Fecha: {log['datetime']}\n"
-                f"Trabajo/Job: {job}\n"
-                f"Labels: {log['labels']}\n"
-                f"Log original:\n{log['message']}\n"
+                "🚨 [NOTAS DE CONOCIMIENTO PREVIO DEL ADMINISTRADOR - PRIORIDAD MÁXIMA]\n"
+                "Para algunos de los errores encontrados, ya conocemos el diagnóstico exacto y la solución preferida del Administrador. "
+                "Por favor, INCORPORA estas soluciones y comandos de forma prioritaria en tu respuesta final:\n"
             )
+            for rule in matched_rules:
+                prompt_lines.append(
+                    f"• Patrón coincidente: '{rule['pattern']}'\n"
+                    f"  - Diagnóstico conocido: {rule.get('cause', 'N/A')}\n"
+                    f"  - Solución recomendada por el Admin: {rule.get('solution', 'N/A')}\n"
+                    f"  - Comandos exactos a sugerir: \n  ```bash\n  {rule.get('commands', '')}\n  ```\n"
+                )
+            prompt_lines.append("\nPor favor, respeta estrictamente estas notas e incorpóralas en el bloque de comandos y solución.")
             
         prompt_lines.append(
-            "\nAnaliza estos logs. Si los errores están correlacionados, "
-            "proporciona una solución conjunta. Limítate estrictamente al formato solicitado."
+            "\nAnaliza estos logs. Si los errores están correlacionados, proporciona una solución conjunta. "
+            "Limítate estrictamente al formato solicitado."
         )
         
         prompt = "\n".join(prompt_lines)
@@ -224,8 +293,8 @@ class GeminiClient:
         }
         
         try:
-            logger.info(f"Enviando {len(logs)} logs a Groq ({self.model_name}) para su diagnóstico...")
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            logger.info(f"Enviando lote de logs a Groq ({self.model_name}) para su diagnóstico...")
+            response = requests.post(url, headers=headers, json=payload, timeout=40)
             
             if response.status_code != 200:
                 logger.error(f"Error devuelto por la API de Groq ({response.status_code}): {response.text}")
@@ -255,25 +324,36 @@ class TelegramClient:
         self.token = config.telegram_bot_token
         self.chat_id = config.telegram_chat_id
         
-    def send_alert(self, logs: List[Dict[str, Any]], analysis: str) -> bool:
-        """Formats and sends a markdown alert message containing the errors and the Gemini diagnostic."""
+    def send_alert(self, grouped_logs: Dict[str, List[Dict[str, Any]]], matched_rules: List[Dict[str, Any]], analysis: str) -> bool:
+        """Formats and sends an aggregated markdown alert message grouped by application."""
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
         
-        logs_summary_lines = []
-        for idx, log in enumerate(logs[:5], 1):
-            job = log["labels"].get("job", "desconocido")
-            short_message = log["message"][:120] + "..." if len(log["message"]) > 120 else log["message"]
-            logs_summary_lines.append(f"• *Job:* `{job}` | `{short_message}`")
+        # Build grouped logs section
+        summary_lines = []
+        for app, items in grouped_logs.items():
+            summary_lines.append(f"📦 *Aplicación:* `{app}`")
+            # Show up to 3 unique logs per application to avoid humongous messages
+            for item in items[:3]:
+                count_str = f" _(x{item['count']})_" if item['count'] > 1 else ""
+                short_message = item["message"][:120] + "..." if len(item["message"]) > 120 else item["message"]
+                summary_lines.append(f"  • `{short_message}`{count_str}")
+            if len(items) > 3:
+                summary_lines.append(f"  • _y {len(items) - 3} logs de error únicos adicionales..._")
+            summary_lines.append("")
             
-        if len(logs) > 5:
-            logs_summary_lines.append(f"• _y {len(logs) - 5} logs de error adicionales..._")
-            
-        logs_summary = "\n".join(logs_summary_lines)
+        logs_summary = "\n".join(summary_lines)
         
+        # Add Knowledge Base Badge
+        kb_badge = ""
+        if matched_rules:
+            patterns = ", ".join(f"`{r['pattern']}`" for r in matched_rules)
+            kb_badge = f"💡 *[Solución Personalizada Aplicada para: {patterns}]*\n\n"
+        
+        # Build the premium Telegram message
         message = (
             f"🚨 **ALERTAS DE LOG DETECTADAS** 🚨\n\n"
-            f"Se han agrupado *{len(logs)}* errores nuevos en esta iteración:\n"
-            f"{logs_summary}\n\n"
+            f"{logs_summary}"
+            f"{kb_badge}"
             f"{analysis}"
         )
         
@@ -315,6 +395,7 @@ class LogMonitor:
         self.loki = LokiClient(config)
         self.gemini = GeminiClient(config)
         self.telegram = TelegramClient(config)
+        self.kb = KnowledgeBase(config.kb_path)
         self.last_processed_timestamp_ns: Optional[int] = None
 
     def establish_baseline(self):
@@ -324,7 +405,7 @@ class LogMonitor:
         lookback_ns = 5 * 60 * 1_000_000_000
         start_time_ns = (time.time_ns()) - lookback_ns
         
-        logs = self.loki.fetch_logs(start_ns=start_time_ns, limit=500)
+        logs = self.loki.fetch_logs(start_ns=start_time_ns, limit=1000)
         
         if logs:
             max_ts = max(log["timestamp_ns"] for log in logs)
@@ -335,9 +416,42 @@ class LogMonitor:
             self.last_processed_timestamp_ns = time.time_ns()
             logger.info(f"No se encontraron logs recientes. Línea base fijada al tiempo actual del sistema: {self.last_processed_timestamp_ns}")
 
+    def group_and_deduplicate(self, logs: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Groups retrieved raw log items by container or job name and collapses
+        identical message strings to count duplications.
+        """
+        grouped = {}
+        for log in logs:
+            # Group by container_name first (standard for docker driver), fallback to job name
+            app = log["labels"].get("container_name", log["labels"].get("job", "sistema"))
+            
+            if app not in grouped:
+                grouped[app] = []
+                
+            msg = log["message"]
+            
+            # Check for exact duplicate in current list
+            found = False
+            for item in grouped[app]:
+                if item["message"] == msg:
+                    item["count"] += 1
+                    item["datetime"] = log["datetime"]  # Update to latest datetime seen
+                    found = True
+                    break
+                    
+            if not found:
+                grouped[app].append({
+                    "message": msg,
+                    "datetime": log["datetime"],
+                    "count": 1,
+                    "labels": log["labels"]
+                })
+        return grouped
+
     def run_poll_cycle(self):
         """Runs a single polling and processing cycle."""
-        logger.info("Iniciando ciclo de son sondeo en Grafana Loki...")
+        logger.info("Iniciando ciclo de sondeo en Grafana Loki...")
         
         safety_window_ns = 2 * 60 * 1_000_000_000
         query_start_ns = self.last_processed_timestamp_ns - safety_window_ns
@@ -359,13 +473,26 @@ class LogMonitor:
             
         logger.info(f"Detectados {len(new_logs)} nuevos logs de error.")
         
-        analysis = self.gemini.analyze_logs(new_logs)
+        # 1. Group and deduplicate in memory
+        grouped_logs = self.group_and_deduplicate(new_logs)
+        
+        # Compile a flat list of unique items for Knowledge Base matching
+        flat_unique_logs = []
+        for items in grouped_logs.values():
+            flat_unique_logs.extend(items)
+            
+        # 2. Match unique logs with local RAG Knowledge Base rules
+        matched_rules = self.kb.match_logs(flat_unique_logs)
+        
+        # 3. Analyze logs in batch, injecting custom solutions if rules were matched
+        analysis = self.gemini.analyze_logs(grouped_logs, matched_rules)
         
         if not analysis:
-            logger.error("No se pudo obtener el análisis de Gemini. Se reintentará en el próximo ciclo.")
+            logger.error("No se pudo obtener el análisis de la IA. Se reintentará en el próximo ciclo.")
             return
             
-        telegram_sent = self.telegram.send_alert(new_logs, analysis)
+        # 4. Dispatch Telegram report grouped by application
+        telegram_sent = self.telegram.send_alert(grouped_logs, matched_rules, analysis)
         
         if telegram_sent:
             max_ts = max(log["timestamp_ns"] for log in new_logs)

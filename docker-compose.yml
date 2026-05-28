@@ -9,3 +9,5 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      - ./knowledge_base.json:/app/knowledge_base.json:ro

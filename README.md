@@ -122,7 +122,23 @@ Si deseas compilar la imagen localmente en el servidor:
     cd /opt/stacks
     git clone git@github.com:snchz/ai-devops-bot.git ai-devops-bot
     ```
-2.  **Iniciar en Dockge**:
+
+2.  **Configurar docker-compose.yml**:
+    ```yaml
+    services:
+      ai-devops-bot:
+        build:
+          context: .
+          dockerfile: Dockerfile
+        container_name: ai-devops-bot
+        restart: unless-stopped
+        env_file:
+          - .env
+        volumes:
+          - ./knowledge_base.json:/app/knowledge_base.json:ro
+    ```
+
+3.  **Iniciar en Dockge**:
     *   Abre la web de **Dockge** y verás el stack `ai-devops-bot` inactivo.
     *   Haz clic en él, pulsa **Edit**, añade tus credenciales en el apartado **`.env`** y haz clic en **Save** y luego en **Active**.
 
@@ -158,7 +174,10 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      - ./knowledge_base.json:/app/knowledge_base.json:ro
 ```
+
 Haz clic en **Save** y luego en **Active**. 
 
 #### Paso 4: Dejar que Watchtower trabaje

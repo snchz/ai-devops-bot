@@ -35,8 +35,9 @@ RUN groupadd -g 10001 appgroup && \
 # Copiar el entorno virtual con las dependencias instaladas desde la etapa builder
 COPY --from=builder /opt/venv /opt/venv
 
-# Copiar el código del bot y ajustar permisos
-COPY bot.py .
+# Copiar el código del bot, base de conocimientos y ajustar permisos
+COPY bot.py knowledge_base.json ./
+
 RUN chown -R appuser:appgroup /app
 
 # Cambiar al usuario no priviligiado
