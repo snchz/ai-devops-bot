@@ -2,41 +2,44 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Docker Slim](https://img.shields.io/badge/docker-slim--3.11-cyan.svg)](https://hub.docker.com/_/python)
-[![Google Gemini](https://img.shields.io/badge/AI-Gemini%201.5%20Flash-orange.svg)](https://ai.google.dev/)
+[![IA Groq](https://img.shields.io/badge/AI-Groq%20Llama%203.3-orange.svg)](https://groq.com/)
 [![Grafana Loki](https://img.shields.io/badge/Loki-Logs-red.svg)](https://grafana.com/oss/loki/)
 [![Telegram Bot](https://img.shields.io/badge/Telegram-Alerts-blue.svg)](https://core.telegram.org/bots)
 
-Una herramienta de nivel **Senior DevOps** diseñada para monitorizar de forma inteligente los logs gestionados en **Grafana Loki**, analizar anomalías y errores críticos mediante la inteligencia artificial de **Google Gemini 1.5 Flash**, y enviar diagnósticos precisos junto con soluciones inmediatas y comandos de consola formateados en Markdown directo a tu canal o chat de **Telegram**.
+Una herramienta de nivel **Senior DevOps** diseñada para monitorizar de forma inteligente los logs gestionados en **Grafana Loki**, analizar anomalías y errores críticos mediante la inteligencia artificial ultra-rápida de **Meta Llama 3.3 (70B) en Groq**, y enviar diagnósticos precisos junto con soluciones inmediatas y comandos de consola formateados en Markdown directo a tu canal o chat de **Telegram**.
 
 ---
 
-## 🏗️ Flujo de Trabajo y Arquitectura
+## 🏗️ Flujo de Trabajo y Arquitectura CI/CD
 
 ```mermaid
 graph TD
-    A[Grafana Loki] -->|1. Polling cada X seg| B[Log Monitor Bot.py]
-    B -->|2. Filtra duplicados en memoria| B
-    B -->|3. Agrupa errores en batch| C[Google Gemini 1.5 Flash]
-    C -->|4. Genera diagnóstico y comandos| B
-    B -->|5. Envía alerta en Markdown| D[Telegram API]
-    D -->|6. Notificación al Administrador| E(Canal / Chat de Telegram)
+    A[Local Git Commit & Push] -->|1. Push to main| B[GitHub Actions CI/CD]
+    B -->|2. Compila y publica| C[GitHub Container Registry (GHCR)]
+    D[Tu Servidor: Watchtower] -->|3. Escanea cambios en GHCR| C
+    C -.->|4. Actualiza imagen e inicia| E[Stack de Dockge: ai-devops-bot]
+    F[Grafana Loki] -->|5. Sondeo cada X seg| E
+    E -->|6. Filtra duplicados y auto-bucles| E
+    E -->|7. Diagnóstico en Lote| G[Groq API (Llama 3.3)]
+    G -->|8. Solución e instrucciones| E
+    E -->|9. Notificación en Markdown| H[Telegram API]
 ```
 
-1. **Sondeo Inteligente**: El bot realiza peticiones periódicas a la API `/loki/api/v1/query_range` buscando términos clave de error (`error`, `fatal`, `panic`).
-2. **Deduplicación en Memoria**: Mantiene registro del timestamp en nanosegundos del último log procesado. Compensa el retraso de ingesta de Loki consultando una ventana de seguridad en el pasado, pero discriminando los logs repetidos a nivel de nanosegundos en memoria.
-3. **Agrupamiento en Lotes (Batching)**: Los errores de una misma ventana de tiempo se analizan de manera conjunta. Esto permite a Gemini detectar fallos en cascada (ej: caída de base de datos afectando a múltiples microservicios dependientes) reduciendo llamadas y spam.
-4. **Análisis Sysadmin Experto**: El bot instruye a Gemini para actuar como un Ingeniero de Sistemas/DevOps Senior, entregando respuestas breves divididas en: **Causa probable**, **Solución paso a paso** y **Comandos recomendados** en bash.
-5. **Notificación Resiliente**: Se envía un reporte detallado a Telegram. El bucle infinito cuenta con captura exhaustiva de excepciones (`try-except`) para garantizar la continuidad del contenedor ante caídas de red o límites de cuota (rate limits).
+1.  **Integración Continua (CI)**: Cada vez que haces un `git push` a `main`, una GitHub Action compila el `Dockerfile` y publica la imagen en `ghcr.io` como pública de forma segura (sin credenciales).
+2.  **Despliegue Continuo (CD)**: Tu contenedor **Watchtower** escanea el registro, descarga la nueva imagen al vuelo y reinicia el bot de forma transparente y automática.
+3.  **Sondeo Antibucles e Ingestión**: El bot realiza peticiones periódicas a Loki. Aplica un filtro LogQL avanzado para **ignorar sus propios logs y los logs de auditoría de Loki**, evitando bucles de retroalimentación infinita.
+4.  **Deduplicación en Memoria**: Mantiene en memoria el timestamp en nanosegundos del último log procesado. Compensa el retraso de ingesta de Loki consultando una ventana de seguridad en el pasado, discriminando duplicados en memoria.
+5.  **Análisis por IA de Groq (Llama 3.3)**: Envía los logs agrupados en lotes (batching) a la API ultrarrápida de Groq. El modelo de Llama 3.3 de 70B actúa como un sysadmin experto, formateando la causa, solución paso a paso y comandos listos para copiar.
 
 ---
 
 ## ✨ Características Principales
 
-*   **Sin frameworks pesados**: Construido usando únicamente `requests`, `google-generativeai` y `python-dotenv`.
-*   **Compensación de Retraso de Ingesta (Ingestion Lag)**: Diseñado para entornos reales de producción donde Loki indexa logs con algunos segundos de retraso.
-*   **Filtro Antispam de Arranque**: En el inicio del bot, se establece una línea base con los logs de los últimos 5 minutos sin lanzar alertas de Telegram por eventos históricos.
-*   **Seguridad Out-of-the-Box**: Dockerfile de producción basado en `python:3.11-slim` multi-etapa que ejecuta el proceso bajo un usuario no root (`appuser`).
-*   **Soporte Opcional para Loki Auth**: Permite conectarse a instancias públicas básicas de Loki o aquellas que utilicen autenticación básica (Basic Auth).
+*   **Sin dependencias pesadas**: Llamadas HTTP nativas ultraligeras (`requests`).
+*   **Prevención de Auto-Alertas**: Filtro anti-bucles inteligente que ignora los logs generados por el bot y las consultas repetitivas del querier de Loki.
+*   **Filtro Antispam de Arranque**: Establece una línea base con los logs de los últimos 5 minutos al iniciar para evitar alertas masivas sobre fallos históricos del servidor.
+*   **Telemetría Verbosa (`LOG_LEVEL`)**: Configura el nivel de detalle (`INFO` o `DEBUG`) directamente desde el archivo `.env` en Dockge sin modificar el código.
+*   **Compatibilidad Hacia Atrás**: Mapea automáticamente variables antiguas de Gemini hacia el motor de Groq de forma transparente.
 
 ---
 
@@ -44,36 +47,34 @@ graph TD
 
 El proyecto consta de la siguiente estructura limpia de archivos:
 
-1.  **[`bot.py`](file:///d:/Aplicaciones/ai-devops-bot/bot.py)**: El script principal modular con control robusto de errores, reintentos y deduplicación.
-2.  **[`requirements.txt`](file:///d:/Aplicaciones/ai-devops-bot/requirements.txt)**: Lista minimalista de requerimientos para Python.
+1.  **[`bot.py`](file:///d:/Aplicaciones/ai-devops-bot/bot.py)**: El script principal modular con conector HTTP a Groq, control robusto de errores y deduplicación.
+2.  **[`requirements.txt`](file:///d:/Aplicaciones/ai-devops-bot/requirements.txt)**: Lista minimalista de requerimientos para Python (`requests` y `python-dotenv`).
 3.  **[`Dockerfile`](file:///d:/Aplicaciones/ai-devops-bot/Dockerfile)**: Dockerfile seguro y optimizado con ejecución no root.
 4.  **[`docker-compose.yml`](file:///d:/Aplicaciones/ai-devops-bot/docker-compose.yml)**: Configuración lista para orquestar y desplegar con Dockge o docker-compose.
-5.  **[`.env.example`](file:///d:/Aplicaciones/ai-devops-bot/.env.example)**: Plantilla con los campos de configuración vacíos.
-6.  **[`README.md`](file:///d:/Aplicaciones/ai-devops-bot/README.md)**: Esta documentación completa del proyecto.
-
+5.  **[`.github/workflows/docker-publish.yml`](file:///d:/Aplicaciones/ai-devops-bot/.github/workflows/docker-publish.yml)**: Flujo CI/CD automatizado para compilar y subir a GHCR.
+6.  **[`.env.example`](file:///d:/Aplicaciones/ai-devops-bot/.env.example)**: Plantilla con los campos de configuración vacíos.
+7.  **[`README.md`](file:///d:/Aplicaciones/ai-devops-bot/README.md)**: Esta documentación completa del proyecto.
 
 ---
 
 ## ⚙️ Configuración (Variables de Entorno)
 
-Crea un archivo `.env` en la raíz del proyecto basándote en el archivo `.env.example`:
+Crea tu archivo `.env` en Dockge basándote en esta estructura:
 
 ```env
 # Configuración de Grafana Loki
-LOKI_URL=http://localhost:3100
+LOKI_URL=http://192.168.0.5:3100
 # Opcional: Credenciales para Basic Auth en Loki (dejar en blanco si no se requiere)
 LOKI_USER=
 LOKI_PASSWORD=
-# Opcional: Query personalizada de Loki (por defecto busca error, fatal o panic)
+# Opcional: Query personalizada de Loki (Excluye por defecto al bot y a Loki para evitar bucles)
 # LOKI_QUERY={job=~".+", container_name!="ai-devops-bot", container_name!="loki"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"
 
-
-
 # Configuración de la Inteligencia Artificial (Groq API)
-# Nota: Puedes usar tanto GROQ_API_KEY como mantener GEMINI_API_KEY
-GROQ_API_KEY=tu_api_key_de_groq_aqui
+# Puedes usar tanto GROQ_API_KEY como GEMINI_API_KEY
+GROQ_API_KEY=gsk_tu_clave_de_groq_aqui
 # Opcional: Modelo de Groq a utilizar (por defecto llama-3.3-70b-versatile)
-# GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=llama-3.3-70b-versatile
 
 # Configuración de Telegram Bot
 TELEGRAM_BOT_TOKEN=tu_telegram_bot_token_aqui
@@ -81,11 +82,13 @@ TELEGRAM_CHAT_ID=tu_telegram_chat_id_o_canal_aqui
 
 # Configuración del Monitor
 POLL_INTERVAL_SECONDS=60
+# Opcional: Nivel de detalle de logs (INFO o DEBUG)
+LOG_LEVEL=INFO
 ```
 
 ---
 
-## 🚀 Guía de Despliegue e Instalación
+## 🚀 Guías de Despliegue
 
 ### Opción A: Ejecución Local en Desarrollo
 
@@ -94,7 +97,6 @@ POLL_INTERVAL_SECONDS=60
     git clone https://github.com/snchz/ai-devops-bot.git
     cd ai-devops-bot
     ```
-
 2.  **Crear y activar un entorno virtual**:
     ```bash
     python -m venv venv
@@ -103,110 +105,69 @@ POLL_INTERVAL_SECONDS=60
     # En Linux/macOS:
     source venv/bin/activate
     ```
-
-3.  **Instalar dependencias**:
+3.  **Instalar dependencias y ejecutar**:
     ```bash
     pip install -r requirements.txt
-    ```
-
-4.  **Ejecutar el bot**:
-    ```bash
     python bot.py
     ```
 
 ---
 
-### Opción B: Despliegue en Docker
+### Opción B: Despliegue en Dockge (Con compilación Local)
 
-1.  **Construir la imagen de producción**:
-    ```bash
-    docker build -t ai-devops-bot:latest .
-    ```
-
-2.  **Lanzar el contenedor**:
-    ```bash
-    docker run -d \
-      --name ai-devops-bot \
-      --env-file .env \
-      --restart unless-stopped \
-      ai-devops-bot:latest
-    ```
-
-3.  **Inspeccionar Logs en tiempo real**:
-    ```bash
-    docker logs -f ai-devops-bot
-    ```
-
----
-
-### Opción C: Despliegue en Dockge (Recomendado para Home Labs / VPS)
-
-**Dockge** es una herramienta excelente para gestionar tus stacks. Puedes desplegar este bot en Dockge a través de dos métodos:
-
-#### Método 1: Clonando el repositorio localmente (Recomendado para repositorios Privados)
-
-Para que Dockge detecte automáticamente el bot, este **debe estar clonado dentro del directorio de stacks** que Dockge tiene asignado (por defecto suele ser `/opt/stacks`):
+Si deseas compilar la imagen localmente en el servidor:
 
 1.  **Clonar en el directorio de stacks de tu servidor**:
     ```bash
-    # Accede al directorio de stacks de Dockge
     cd /opt/stacks
-
-    # Clona tu repositorio privado (puedes usar SSH o un PAT)
     git clone git@github.com:snchz/ai-devops-bot.git ai-devops-bot
-    cd ai-devops-bot
     ```
-
-2.  **Crear el archivo `docker-compose.yml`** dentro de esa carpeta:
-    ```yaml
-    version: "3.8"
-
-    services:
-      ai-devops-bot:
-        build:
-          context: .
-          dockerfile: Dockerfile
-        container_name: ai-devops-bot
-        restart: unless-stopped
-        env_file:
-          - .env
-    ```
-
-3.  **Iniciar en Dockge**:
-    *   Abre la web de **Dockge** y verás el stack `ai-devops-bot` inactivo en la barra lateral.
+2.  **Iniciar en Dockge**:
+    *   Abre la web de **Dockge** y verás el stack `ai-devops-bot` inactivo.
     *   Haz clic en él, pulsa **Edit**, añade tus credenciales en el apartado **`.env`** y haz clic en **Save** y luego en **Active**.
 
 ---
 
-#### Método 2: Despliegue Directo desde la Web (Recomendado para repositorios Públicos)
+### Opción C: Despliegue Profesional de CI/CD (GitHub Actions + Watchtower)
 
-Si tu repositorio es público, no necesitas clonar nada por SSH en tu servidor. Puedes indicarle a Dockge que construya la imagen directamente leyendo tu repositorio de GitHub desde internet:
+Este es el flujo definitivo automatizado que compila en la nube y se despliega solo:
 
-1.  Abre la web de **Dockge** y haz clic en **Compose** (Componer).
-2.  Dale el nombre `ai-devops-bot` en **Stack Name**.
-3.  En el editor web de `docker-compose.yml`, pega lo siguiente:
-    ```yaml
-    version: "3.8"
+#### Paso 1: Subir tus archivos a GitHub
+Realiza el `git push` de tu repositorio local. Esto disparará automáticamente la GitHub Action configurada en `.github/workflows/docker-publish.yml` que compilará y subirá la imagen a GitHub Packages.
+```bash
+git add .
+git commit -m "feat: add groq and github actions ci-cd"
+git push
+```
 
-    services:
-      ai-devops-bot:
-        build:
-          context: https://github.com/snchz/ai-devops-bot.git#main
-          dockerfile: Dockerfile
-        container_name: ai-devops-bot
-        restart: unless-stopped
-        env_file:
-          - .env
-    ```
+#### Paso 2: Hacer la imagen pública
+1.  Ve a tu perfil de GitHub en la web -> **Packages** -> **ai-devops-bot**.
+2.  Haz clic en **Package settings** (columna derecha).
+3.  Bajo **Change visibility**, selecciónalo como **Public** (Público) y guarda. *(Es seguro ya que las credenciales van en tu `.env` local, no en la imagen).*
 
-4.  Crea tu archivo **`.env`** en la pestaña correspondiente a la derecha con tus credenciales.
-5.  Haz clic en **Save** y **Active**. ¡Dockge descargará tu código en memoria, construirá la imagen y levantará el bot!
+#### Paso 3: Configurar en Dockge
+Abre **Dockge** y edita tu archivo `docker-compose.yml` para usar la imagen compilada en lugar de construirla localmente:
 
+```yaml
+version: "3.8"
+
+services:
+  ai-devops-bot:
+    image: ghcr.io/snchz/ai-devops-bot:latest
+    container_name: ai-devops-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+```
+Haz clic en **Save** y luego en **Active**. 
+
+#### Paso 4: Dejar que Watchtower trabaje
+Dado que tienes **Watchtower** ejecutándose en tu servidor, este revisará periódicamente tu GitHub Packages. En cuanto detecte que has subido un cambio a GitHub, descargará la nueva imagen automáticamente y reiniciará tu contenedor de `ai-devops-bot` de forma transparente.
 
 ---
 
 ## 📄 Licencia
 
-Este proyecto está bajo la licencia MIT. Siéntete libre de usarlo, modificarlo y adaptarlo a tu infraestructura de producción.
+Este proyecto está bajo la licencia MIT.
 
 Desarrollado y mantenido con 💻 por **[snchz](https://github.com/snchz)**.
