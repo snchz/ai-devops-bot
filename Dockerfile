@@ -37,6 +37,7 @@ COPY --from=builder /opt/venv /opt/venv
 
 # Copiar el código del bot, base de conocimientos y ajustar permisos
 COPY bot.py knowledge_base.json ./
+COPY src/ ./src/
 
 RUN chown -R appuser:appgroup /app
 
