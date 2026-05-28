@@ -1,22 +1,22 @@
 import re
-import requests
+import httpx
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from src.config import Config
 from src.logger import logger
 
 class LokiClient:
-    """Client to query Grafana Loki HTTP API."""
+    """Client to query Grafana Loki HTTP API asynchronously."""
     
     def __init__(self, config: Config):
         self.base_url = config.loki_url
         self.query = config.loki_query
         self.auth = None
         if config.loki_user and config.loki_password:
-            self.auth = (config.loki_user, config.loki_password)
+            self.auth = httpx.BasicAuth(config.loki_user, config.loki_password)
             
-    def fetch_logs(self, start_ns: Optional[int] = None, limit: int = 500) -> List[Dict[str, Any]]:
-        """Queries /loki/api/v1/query_range."""
+    async def fetch_logs(self, start_ns: Optional[int] = None, limit: int = 500) -> List[Dict[str, Any]]:
+        """Queries /loki/api/v1/query_range asynchronously."""
         url = f"{self.base_url}/loki/api/v1/query_range"
         
         params: Dict[str, Any] = {
@@ -29,7 +29,8 @@ class LokiClient:
             
         try:
             logger.debug(f"Consultando Loki a través de: {url} con start={start_ns}")
-            response = requests.get(url, params=params, auth=self.auth, timeout=15)
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.get(url, params=params, auth=self.auth)
             
             if response.status_code != 200:
                 logger.error(f"Error devuelto por Loki ({response.status_code}): {response.text}")
@@ -70,7 +71,7 @@ class LokiClient:
             all_logs.sort(key=lambda x: x["timestamp_ns"])
             return all_logs
             
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             logger.error(f"Error de red al conectar con Loki en {url}: {e}")
             return []
         except Exception as e:

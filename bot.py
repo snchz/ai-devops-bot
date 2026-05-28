@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
 """
-AI Log Monitor & Analyzer Bot - Entrypoint
+AI Log Monitor & Analyzer Bot - Entrypoint (Async Edition)
 ------------------------------------------
-Imports modules from the `src` package and starts the polling loop.
+Imports modules from the `src` package and starts the polling loop asynchronously.
 
 Author: snchz
 """
 
 import sys
+import asyncio
 from src.logger import logger
 from src.config import Config
 from src.monitor import LogMonitor
 
+async def main():
+    config = Config()
+    monitor = LogMonitor(config)
+    await monitor.start()
+
 if __name__ == "__main__":
     try:
-        config = Config()
-        monitor = LogMonitor(config)
-        monitor.start()
+        asyncio.run(main())
     except ValueError as e:
         logger.critical(f"Error de configuración al arrancar el bot: {e}")
         sys.exit(1)

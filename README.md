@@ -45,11 +45,15 @@ graph TD
 
 ## ✨ Main Features
 
-*   **Zero heavy SDKs**: Lightweight, raw HTTP connections (`requests`).
+*   **Fully Asynchronous Engine**: Built completely on `asyncio` and `httpx` for non-blocking concurrent log processing, health monitoring, and Telegram messaging.
+*   **Secure Self-Healing Subprocess Execution**: Click `[ Ejecutar Solución ⚡ ]` directly on Telegram alerts to trigger remote shell resolution commands in a 30s async subprocess!
+*   **Operator Authentication Access Control**: Enforces whitelisting via `TELEGRAM_ALLOWED_USER_IDS` to securely block unauthorized execution from arbitrary Telegram users.
+*   **Polymorphic AI Providers**: Toggle instantly between Groq (Meta Llama 3.3), Google Gemini (natively via REST), and Ollama (local AI models running on your hardware) via `AI_PROVIDER`.
+*   **Smart Cooldown Alert Fatigue Prevention**: Automatically suppresses duplicate error logs within the configured `COOLDOWN_MINUTES` window to keep your channels quiet.
+*   **Prometheus & Healthcheck Server**: Exposes `/healthz` and standard `/metrics` ports asynchronously using zero third-party dependencies.
+*   **JSON Structured Logging**: Output standardized JSON logs (`LOG_FORMAT=JSON`) for immediate seamless ingestion into Loki or ELK.
 *   **Anti-Self-Alerting Loops**: Advanced LogQL and regex filtering to block self-matching loops.
 *   **Startup Antispam Baseline**: On startup, establishes a baseline from the last 5 minutes of logs without firing alerts, avoiding notification flooding on container restarts.
-*   **Dynamic Verbose Telemetry (`LOG_LEVEL`)**: Instantly toggle log verbosity levels (`INFO` or `DEBUG`) directly from your `.env` in Dockge without touching code.
-*   **Backward Compatibility**: Automatically maps older Gemini environment variables and model configurations to Groq's high-speed `llama-3.3-70b-versatile` engine.
 
 ---
 
@@ -81,19 +85,39 @@ LOKI_PASSWORD=
 # Optional: Custom Loki LogQL Query (default excludes bot, loki, and internal_logs)
 # LOKI_QUERY={job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"
 
-# Artificial Intelligence (Groq API) Configuration
-# Backwards compatible: supports GROQ_API_KEY or GEMINI_API_KEY
+# Logging Format (TEXT or JSON)
+LOG_FORMAT=TEXT
+
+# AI Provider Selection (groq, gemini, or ollama)
+AI_PROVIDER=groq
+
+# Provider A: Groq API (Llama 3.3)
 GROQ_API_KEY=gsk_your_groq_api_key_here
-# Optional: Groq model name (defaults to llama-3.3-70b-versatile)
 GROQ_MODEL=llama-3.3-70b-versatile
+
+# Provider B: Google Gemini (REST native)
+GEMINI_API_KEY=AIzaSy_your_gemini_key_here
+GEMINI_MODEL=gemini-2.5-flash
+
+# Provider C: Ollama (Local AI)
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=llama3
 
 # Telegram Bot Configuration
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 
-# Monitoring Configuration
+# Remoted Command Whitelist (comma-separated operator Telegram User IDs)
+TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
+
+# Monitoring & Fatigue Prevention Configuration
 POLL_INTERVAL_SECONDS=60
-# Optional: Logging level (INFO or DEBUG)
+COOLDOWN_MINUTES=15
+
+# Observability Telemetry Port (defaults to 8000)
+HEALTHCHECK_PORT=8000
+
+# Logging level (INFO or DEBUG)
 LOG_LEVEL=INFO
 ```
 
@@ -226,17 +250,17 @@ graph TD
 3.  **Sondeo Antibucles e Ingestión**: El bot realiza peticiones periódicas a Loki. Aplica un filtro LogQL avanzado para **ignorar sus propios logs y los logs de auditoría de Loki**, evitando bucles de retroalimentación infinita.
 4.  **Deduplicación en Memoria**: Mantiene en memoria el timestamp en nanosegundos del último log procesado. Compensa el retraso de ingesta de Loki consultando una ventana de seguridad en el pasado, discriminando duplicados en memoria.
 5.  **Limpiador de códigos ANSI**: Limpia automáticamente los códigos de escape de color de consola ANSI (`\x1b\[[0-9;]*[a-zA-Z]`) de los logs, produciendo un Markdown de Telegram muy limpio y permitiendo una deduplicación perfecta de las trazas de Docker.
-6.  **IA Local RAG (Base de Conocimientos)**: Parsea una base de conocimientos local `knowledge_base.json`. Si un error coincide con un patrón (ej. `pvpc_hourly_pricing`), **inyecta tus notas de diagnóstico y tus comandos bash de solución preferidos** en el prompt de Llama 3.3 de forma prioritaria.
+6.  **IA Local RAG (Base de Conocimientos)**: Parsea una base de conocimientos local `knowledge_base.json`. Si un error coincide con un patrón (ej. `pvpc_hourly_pricing`), **inyecta tus notas de diagnóstico y tus comandos bash de soluc## ✨ Características Principales
 
----
-
-## ✨ Características Principales
-
-*   **Sin dependencias pesadas**: Llamadas HTTP nativas ultraligeras (`requests`).
-*   **Prevención de Auto-Alertas**: Filtro anti-bucles inteligente que ignora los logs generados por el bot y las consultas repetitivas del querier de Loki.
-*   **Filtro Antispam de Arranque**: Establece una línea base con los logs de los últimos 5 minutos al iniciar para evitar alertas masivas sobre fallos históricos del servidor.
-*   **Telemetría Verbosa (`LOG_LEVEL`)**: Configura el nivel de detalle (`INFO` o `DEBUG`) directamente desde el archivo `.env` en Dockge sin modificar el código.
-*   **Compatibilidad Hacia Atrás**: Mapea automáticamente variables antiguas de Gemini hacia el motor de Groq de forma transparente.
+*   **Motor Totalmente Asíncrono**: Basado en `asyncio` y `httpx` para un procesamiento de logs, métricas y mensajería ultrarrápido y no bloqueante.
+*   **Autocurado Interactivo Seguro**: Ejecuta comandos de consola remotos directamente pulsando `[ Ejecutar Solución ⚡ ]` en tu chat de Telegram en un subproceso asíncrono con timeout de 30s.
+*   **Control de Acceso mediante Whitelist**: Valida al operador mediante `TELEGRAM_ALLOWED_USER_IDS` bloqueando ejecuciones de usuarios de Telegram no autorizados.
+*   **Proveedores de IA Polimórficos**: Elige dinámicamente tu cerebro de IA (`AI_PROVIDER`) entre Groq (Llama 3.3), Google Gemini (REST nativo sin SDKs) y Ollama (IA local ejecutándose en tu servidor).
+*   **Prevención de Fatiga de Alertas (Cooldown)**: Silencia alertas repetidas para el mismo error durante el tiempo configurado en `COOLDOWN_MINUTES` para evitar el spam en tus canales.
+*   **Servidor HTTP de Salud y Prometheus**: Expone endpoints de `/healthz` y `/metrics` compatibles con Prometheus de forma nativa sin dependencias adicionales.
+*   **Logs Estructurados en JSON**: Emite trazas en formato JSON (`LOG_FORMAT=JSON`) listas para ingestas automatizadas en Loki o ELK.
+*   **Prevención de Auto-Alertas**: Filtro anti-bucles inteligente que ignora los logs generados por el bot y las consultas de Loki.
+*   **Filtro Antispam de Arranque**: Establece una línea base con los logs de los últimos 5 minutos al iniciar para evitar alertas masivas en reinicios.
 
 ---
 
@@ -257,7 +281,7 @@ El proyecto consta de la siguiente estructura limpia de archivos:
 
 ## ⚙️ Configuración (Variables de Entorno)
 
-Crea tu archivo `.env` en Dockge basándote en esta estructura:
+Crea tu archivo `.env` en Dockge basándose en esta estructura:
 
 ```env
 # Configuración de Grafana Loki
@@ -268,17 +292,41 @@ LOKI_PASSWORD=
 # Opcional: Query personalizada de Loki (Excluye por defecto al bot y a Loki para evitar bucles)
 # LOKI_QUERY={job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"
 
-# Configuración de la Inteligencia Artificial (Groq API)
-# Puedes usar tanto GROQ_API_KEY como GEMINI_API_KEY
+# Formato de Logs (TEXT o JSON)
+LOG_FORMAT=TEXT
+
+# Selección de Cerebro de IA (groq, gemini, o ollama)
+AI_PROVIDER=groq
+
+# Proveedor A: Groq API (Llama 3.3)
 GROQ_API_KEY=gsk_tu_clave_de_groq_aqui
-# Opcional: Modelo de Groq a utilizar (por defecto llama-3.3-70b-versatile)
 GROQ_MODEL=llama-3.3-70b-versatile
+
+# Proveedor B: Google Gemini (REST nativo)
+GEMINI_API_KEY=AIzaSy_tu_clave_de_gemini_aqui
+GEMINI_MODEL=gemini-2.5-flash
+
+# Proveedor C: Ollama (IA Local en tu Servidor)
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=llama3
 
 # Configuración de Telegram Bot
 TELEGRAM_BOT_TOKEN=tu_telegram_bot_token_aqui
 TELEGRAM_CHAT_ID=tu_telegram_chat_id_o_canal_aqui
 
-# Configuración del Monitor
+# Seguridad del Autocurado (Whitelisting de IDs de usuario de Telegram autorizados, separados por comas)
+TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
+
+# Configuración de Frecuencia y Mitigación de Spam
+POLL_INTERVAL_SECONDS=60
+COOLDOWN_MINUTES=15
+
+# Puerto de Observabilidad y Salud (default: 8000)
+HEALTHCHECK_PORT=8000
+
+# Opcional: Nivel de detalle de logs (INFO o DEBUG)
+LOG_LEVEL=INFO
+```del Monitor
 POLL_INTERVAL_SECONDS=60
 # Opcional: Nivel de detalle de logs (INFO o DEBUG)
 LOG_LEVEL=INFO
