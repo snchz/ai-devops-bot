@@ -1,0 +1,22 @@
+# --- Credenciales y Variables de Entorno (Crítico) ---
+*.env
+
+# --- Caches de Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Entornos Virtuales ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- IDEs y Editores ---
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Logs del Sistema ---
+*.log
