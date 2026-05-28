@@ -65,7 +65,8 @@ LOKI_URL=http://localhost:3100
 LOKI_USER=
 LOKI_PASSWORD=
 # Opcional: Query personalizada de Loki (por defecto busca error, fatal o panic)
-# LOKI_QUERY={job=~".+"} |~ "(?i)(error|fatal|panic)"
+# LOKI_QUERY={job=~".+", container_name!="ai-devops-bot", container_name!="loki"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"
+
 
 
 # Configuración de la Inteligencia Artificial (Groq API)

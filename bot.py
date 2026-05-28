@@ -49,8 +49,9 @@ class Config:
         self.loki_user = os.getenv("LOKI_USER", None)
         self.loki_password = os.getenv("LOKI_PASSWORD", None)
         
-        # Loki Query: default matches errors, fatals, and panics across non-empty jobs
-        self.loki_query = os.getenv("LOKI_QUERY", '{job=~".+"} |~ "(?i)(error|fatal|panic)"')
+        # Loki Query: default matches errors, fatals, and panics but excludes the bot and loki to prevent self-loops
+        self.loki_query = os.getenv("LOKI_QUERY", '{job=~".+", container_name!="ai-devops-bot", container_name!="loki"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"')
+
         
         # IA (Groq) Configuration
         # Backwards compatible: load from GROQ_API_KEY or fallback to GEMINI_API_KEY to avoid forcing .env renames
