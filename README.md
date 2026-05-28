@@ -157,11 +157,11 @@ Para que Dockge detecte automáticamente el bot, este **debe estar clonado dentr
     version: "3.8"
 
     services:
-      log-analyzer:
+      ai-devops-bot:
         build:
           context: .
           dockerfile: Dockerfile
-        container_name: loki-gemini-bot
+        container_name: ai-devops-bot
         restart: unless-stopped
         env_file:
           - .env
@@ -184,15 +184,16 @@ Si tu repositorio es público, no necesitas clonar nada por SSH en tu servidor. 
     version: "3.8"
 
     services:
-      log-analyzer:
+      ai-devops-bot:
         build:
           context: https://github.com/snchz/ai-devops-bot.git#main
           dockerfile: Dockerfile
-        container_name: loki-gemini-bot
+        container_name: ai-devops-bot
         restart: unless-stopped
         env_file:
           - .env
     ```
+
 4.  Crea tu archivo **`.env`** en la pestaña correspondiente a la derecha con tus credenciales.
 5.  Haz clic en **Save** y **Active**. ¡Dockge descargará tu código en memoria, construirá la imagen y levantará el bot!
 

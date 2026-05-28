@@ -1,11 +1,11 @@
 version: "3.8"
 
 services:
-  log-analyzer:
+  ai-devops-bot:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: loki-gemini-bot
+    container_name: ai-devops-bot
     restart: unless-stopped
     env_file:
       - .env
