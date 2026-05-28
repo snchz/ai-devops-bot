@@ -34,6 +34,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("LogAnalyzerBot")
 
+# Silence verbose background HTTP polling from the httpx library
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 # Global thread-safe metrics dictionary for health/metrics server
 METRICS = {
     "cycles": 0,
