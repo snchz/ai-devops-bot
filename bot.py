@@ -2,8 +2,8 @@
 """
 AI Log Monitor & Analyzer Bot
 ------------------------------
-Monitors Grafana Loki for errors, analyzes them with Google Gemini (1.5-flash),
-and sends actionable solutions to a Telegram chat.
+Monitors Grafana Loki for errors, analyzes them with Meta Llama 3.3 (70B)
+via the ultra-fast Groq API (100% free and EU-compatible), and alerts Telegram.
 
 Author: Senior DevOps & Python Developer
 Language: Python 3.11+
@@ -15,14 +15,12 @@ import logging
 import sys
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
-import urllib.parse
 
 import requests
 from dotenv import load_dotenv
-import google.generativeai as genai
 
 # Setup logging dynamically based on environment
-load_dotenv()  # Load here to have log level configuration early
+load_dotenv()
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
 
@@ -36,12 +34,11 @@ logging.basicConfig(
 logger = logging.getLogger("LogAnalyzerBot")
 
 
-
 class Config:
     """Manages and validates configuration loaded from environment variables."""
     
     def __init__(self):
-        # Load environment variables from .env if present
+        # Load environment variables
         load_dotenv()
         
         # Loki Configuration
@@ -52,19 +49,22 @@ class Config:
         self.loki_user = os.getenv("LOKI_USER", None)
         self.loki_password = os.getenv("LOKI_PASSWORD", None)
         
-        # Loki Query: default matches errors, fatals, and panics across all jobs
+        # Loki Query: default matches errors, fatals, and panics across non-empty jobs
         self.loki_query = os.getenv("LOKI_QUERY", '{job=~".+"} |~ "(?i)(error|fatal|panic)"')
-
         
-        # Gemini Configuration
-        self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
-        if not self.gemini_api_key:
-            raise ValueError("GEMINI_API_KEY es obligatorio en la configuración.")
+        # IA (Groq) Configuration
+        # Backwards compatible: load from GROQ_API_KEY or fallback to GEMINI_API_KEY to avoid forcing .env renames
+        self.groq_api_key = os.getenv("GROQ_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+        if not self.groq_api_key:
+            raise ValueError("GROQ_API_KEY (o GEMINI_API_KEY con tu clave gsk_ de Groq) es obligatorio.")
             
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        model = os.getenv("GEMINI_MODEL", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
+        # Auto-map Gemini model strings to standard Groq Llama model for seamless migration
+        if "gemini" in model or "google/" in model:
+            model = "llama-3.3-70b-versatile"
+        self.groq_model = model
         
         # Telegram Configuration
-
         self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
         if not self.telegram_bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN es obligatorio en la configuración.")
@@ -92,17 +92,7 @@ class LokiClient:
             self.auth = (config.loki_user, config.loki_password)
             
     def fetch_logs(self, start_ns: Optional[int] = None, limit: int = 250) -> List[Dict[str, Any]]:
-        """
-        Queries /loki/api/v1/query_range.
-        
-        Args:
-            start_ns: Optional Unix nanosecond timestamp to fetch logs from.
-            limit: Max log lines to return in query.
-            
-        Returns:
-            A list of dictionary log objects sorted chronologically:
-            [ { 'timestamp_ns': int, 'labels': dict, 'message': str, 'datetime': str }, ... ]
-        """
+        """Queries /loki/api/v1/query_range."""
         url = f"{self.base_url}/loki/api/v1/query_range"
         
         params: Dict[str, Any] = {
@@ -150,7 +140,6 @@ class LokiClient:
                         logger.warning(f"Error procesando valor de log de Loki: {err}")
                         continue
                         
-            # Sort globally by timestamp (Loki returns grouped streams which may overlap in time)
             all_logs.sort(key=lambda x: x["timestamp_ns"])
             return all_logs
             
@@ -163,12 +152,13 @@ class LokiClient:
 
 
 class GeminiClient:
-    """Client to interact with Google Generative AI (Gemini)."""
+    """Client to interact with Groq API using Llama 3.3 70B."""
     
     def __init__(self, config: Config):
-        genai.configure(api_key=config.gemini_api_key)
+        self.api_key = config.groq_api_key
+        self.model_name = config.groq_model
         
-        # System instructions to configure Gemini as an expert DevOps/sysadmin
+        # System instructions to configure Llama as an expert DevOps/sysadmin
         self.system_instruction = (
             "Actúa como un Ingeniero DevOps y Administrador de Sistemas Linux/Kubernetes Senior "
             "altamente experimentado. Tu tarea es analizar logs de error, diagnosticar causas probables "
@@ -188,22 +178,12 @@ class GeminiClient:
             "[Comandos para diagnosticar o reparar]\n"
             "```"
         )
-        
-        try:
-            self.model = genai.GenerativeModel(
-                model_name=config.gemini_model,
-                system_instruction=self.system_instruction
-            )
-            logger.info(f"Cliente de Gemini inicializado correctamente con el modelo {config.gemini_model}.")
-
-        except Exception as e:
-            logger.error(f"Error al inicializar el modelo de Gemini: {e}")
-            self.model = None
+        logger.info(f"Cliente de Inteligencia Artificial (Groq) inicializado con el modelo {self.model_name}.")
 
     def analyze_logs(self, logs: List[Dict[str, Any]]) -> Optional[str]:
-        """Sends logs to Gemini for diagnostic analysis."""
-        if not self.model:
-            logger.error("El modelo de Gemini no está inicializado. Saltando análisis.")
+        """Sends logs to Groq for diagnostic analysis."""
+        if not self.api_key:
+            logger.error("API Key de Groq vacía. Saltando análisis.")
             return None
             
         # Format the log collection into a clear, structured prompt
@@ -228,12 +208,42 @@ class GeminiClient:
         
         prompt = "\n".join(prompt_lines)
         
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "system", "content": self.system_instruction},
+                {"role": "user", "content": prompt}
+            ]
+        }
+        
         try:
-            logger.info(f"Enviando {len(logs)} logs a Gemini para su diagnóstico...")
-            response = self.model.generate_content(prompt)
-            return response.text
+            logger.info(f"Enviando {len(logs)} logs a Groq ({self.model_name}) para su diagnóstico...")
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            
+            if response.status_code != 200:
+                logger.error(f"Error devuelto por la API de Groq ({response.status_code}): {response.text}")
+                return None
+                
+            data = response.json()
+            choices = data.get("choices", [])
+            if not choices:
+                logger.error(f"Respuesta inesperada de Groq (sin choices): {data}")
+                return None
+                
+            analysis = choices[0].get("message", {}).get("content", "")
+            return analysis
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error de red al conectar con Groq: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Error al llamar a la API de Gemini: {e}")
+            logger.error(f"Excepción inesperada en GeminiClient: {e}")
             return None
 
 
@@ -245,23 +255,12 @@ class TelegramClient:
         self.chat_id = config.telegram_chat_id
         
     def send_alert(self, logs: List[Dict[str, Any]], analysis: str) -> bool:
-        """
-        Formats and sends a markdown alert message containing the errors and the Gemini diagnostic.
-        
-        Args:
-            logs: The list of raw logs processed in this batch.
-            analysis: The Markdown string response returned by Gemini.
-            
-        Returns:
-            True if sent successfully, False otherwise.
-        """
+        """Formats and sends a markdown alert message containing the errors and the Gemini diagnostic."""
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
         
-        # Create a clean summary of the errors to attach in the Telegram message header
         logs_summary_lines = []
         for idx, log in enumerate(logs[:5], 1):
             job = log["labels"].get("job", "desconocido")
-            # Truncate long log messages for visual neatness in Telegram
             short_message = log["message"][:120] + "..." if len(log["message"]) > 120 else log["message"]
             logs_summary_lines.append(f"• *Job:* `{job}` | `{short_message}`")
             
@@ -270,7 +269,6 @@ class TelegramClient:
             
         logs_summary = "\n".join(logs_summary_lines)
         
-        # Build the final premium message template
         message = (
             f"🚨 **ALERTAS DE LOG DETECTADAS** 🚨\n\n"
             f"Se han agrupado *{len(logs)}* errores nuevos en esta iteración:\n"
@@ -278,7 +276,6 @@ class TelegramClient:
             f"{analysis}"
         )
         
-        # Ensure we don't exceed Telegram's message character limit of 4096 bytes
         if len(message) > 4000:
             message = message[:3900] + "\n\n*(Alerta truncada por límite de tamaño de Telegram)*"
             
@@ -310,25 +307,19 @@ class TelegramClient:
 
 
 class LogMonitor:
-    """Orchestrator to poll Loki, process logs, get suggestions from Gemini, and alert via Telegram."""
+    """Orchestrator to poll Loki, process logs, get suggestions, and alert via Telegram."""
     
     def __init__(self, config: Config):
         self.config = config
         self.loki = LokiClient(config)
         self.gemini = GeminiClient(config)
         self.telegram = TelegramClient(config)
-        
-        # In-memory storage for the timestamp of the last processed log (in nanoseconds)
         self.last_processed_timestamp_ns: Optional[int] = None
 
     def establish_baseline(self):
-        """
-        Executes on startup. Queries Loki for the last 5 minutes to find the most recent log timestamp.
-        This establishes a baseline so we avoid analyzing or spamming historical errors when the bot restarts.
-        """
+        """Queries Loki for the last 5 minutes to find the most recent log timestamp to avoid historical spam."""
         logger.info("Estableciendo línea base de logs para evitar falsos positivos históricos...")
         
-        # Lookback window for baseline: 5 minutes in nanoseconds
         lookback_ns = 5 * 60 * 1_000_000_000
         start_time_ns = (time.time_ns()) - lookback_ns
         
@@ -345,11 +336,8 @@ class LogMonitor:
 
     def run_poll_cycle(self):
         """Runs a single polling and processing cycle."""
-        logger.info("Iniciando ciclo de sondeo en Grafana Loki...")
+        logger.info("Iniciando ciclo de son sondeo en Grafana Loki...")
         
-        # Query logs since the last processed timestamp
-        # To handle ingestion delays, we query Loki from (last_processed_timestamp_ns - 2 minutes)
-        # but filter strictly in memory using (timestamp > last_processed_timestamp_ns)
         safety_window_ns = 2 * 60 * 1_000_000_000
         query_start_ns = self.last_processed_timestamp_ns - safety_window_ns
         
@@ -362,8 +350,6 @@ class LogMonitor:
             logger.info("No se recibieron logs de Loki en este ciclo.")
             return
 
-
-        # Filtering step: only logs strictly newer than last_processed_timestamp_ns
         new_logs = [log for log in fetched_logs if log["timestamp_ns"] > self.last_processed_timestamp_ns]
         
         if not new_logs:
@@ -372,18 +358,15 @@ class LogMonitor:
             
         logger.info(f"Detectados {len(new_logs)} nuevos logs de error.")
         
-        # Analyze using Gemini
         analysis = self.gemini.analyze_logs(new_logs)
         
         if not analysis:
             logger.error("No se pudo obtener el análisis de Gemini. Se reintentará en el próximo ciclo.")
             return
             
-        # Alert using Telegram
         telegram_sent = self.telegram.send_alert(new_logs, analysis)
         
         if telegram_sent:
-            # Update last processed timestamp to prevent reprocessing
             max_ts = max(log["timestamp_ns"] for log in new_logs)
             self.last_processed_timestamp_ns = max_ts
             logger.info(f"Ciclo completado. Último timestamp actualizado a: {max_ts}")
@@ -392,9 +375,8 @@ class LogMonitor:
 
     def start(self):
         """Starts the infinite polling loop."""
-        logger.info("Iniciando Bot de Monitoreo de Logs con Gemini...")
+        logger.info("Iniciando Bot de Monitoreo de Logs con Groq (Llama 3.3)...")
         
-        # Establish startup baseline
         try:
             self.establish_baseline()
         except Exception as e:
@@ -402,12 +384,10 @@ class LogMonitor:
             self.last_processed_timestamp_ns = time.time_ns()
             logger.info(f"Fijando timestamp de seguridad al tiempo actual por fallo: {self.last_processed_timestamp_ns}")
             
-        # Infinite Loop with robust error capturing to maintain container health
         while True:
             try:
                 self.run_poll_cycle()
             except Exception as e:
-                # Catch-all exception so the container/process never crashes on transient faults
                 logger.error(f"Excepción crítica no controlada en el ciclo de monitoreo: {e}", exc_info=True)
                 
             logger.info(f"Durmiendo el proceso durante {self.config.poll_interval} segundos...")

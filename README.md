@@ -68,8 +68,11 @@ LOKI_PASSWORD=
 # LOKI_QUERY={job=~".+"} |~ "(?i)(error|fatal|panic)"
 
 
-# Configuración de Google Gemini API
-GEMINI_API_KEY=tu_api_key_de_gemini_aqui
+# Configuración de la Inteligencia Artificial (Groq API)
+# Nota: Puedes usar tanto GROQ_API_KEY como mantener GEMINI_API_KEY
+GROQ_API_KEY=tu_api_key_de_groq_aqui
+# Opcional: Modelo de Groq a utilizar (por defecto llama-3.3-70b-versatile)
+# GROQ_MODEL=llama-3.3-70b-versatile
 
 # Configuración de Telegram Bot
 TELEGRAM_BOT_TOKEN=tu_telegram_bot_token_aqui
