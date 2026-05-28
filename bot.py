@@ -48,7 +48,8 @@ class Config:
         self.loki_password = os.getenv("LOKI_PASSWORD", None)
         
         # Loki Query: default matches errors, fatals, and panics across all jobs
-        self.loki_query = os.getenv("LOKI_QUERY", '{job=~".*"} |~ "(?i)(error|fatal|panic)"')
+        self.loki_query = os.getenv("LOKI_QUERY", '{job=~".+"} |~ "(?i)(error|fatal|panic)"')
+
         
         # Gemini Configuration
         self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")

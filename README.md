@@ -65,7 +65,8 @@ LOKI_URL=http://localhost:3100
 LOKI_USER=
 LOKI_PASSWORD=
 # Opcional: Query personalizada de Loki (por defecto busca error, fatal o panic)
-# LOKI_QUERY={job=~".*"} |~ "(?i)(error|fatal|panic)"
+# LOKI_QUERY={job=~".+"} |~ "(?i)(error|fatal|panic)"
+
 
 # Configuración de Google Gemini API
 GEMINI_API_KEY=tu_api_key_de_gemini_aqui
