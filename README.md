@@ -136,18 +136,23 @@ POLL_INTERVAL_SECONDS=60
 
 ### Opción C: Despliegue en Dockge (Recomendado para Home Labs / VPS)
 
-**Dockge** es una herramienta excelente para gestionar tus stacks de Docker Compose. Sigue este flujo de despliegue:
+**Dockge** es una herramienta excelente para gestionar tus stacks. Puedes desplegar este bot en Dockge a través de dos métodos:
 
-1.  **Clonar el repositorio en el servidor de Dockge**:
-    Conéctate por SSH a tu servidor y clona el proyecto dentro del directorio de tus stacks de Dockge (usualmente `/opt/stacks`):
+#### Método 1: Clonando el repositorio localmente (Recomendado para repositorios Privados)
+
+Para que Dockge detecte automáticamente el bot, este **debe estar clonado dentro del directorio de stacks** que Dockge tiene asignado (por defecto suele ser `/opt/stacks`):
+
+1.  **Clonar en el directorio de stacks de tu servidor**:
     ```bash
+    # Accede al directorio de stacks de Dockge
     cd /opt/stacks
-    git clone https://github.com/snchz/ai-devops-bot.git ai-devops-bot
+
+    # Clona tu repositorio privado (puedes usar SSH o un PAT)
+    git clone git@github.com:snchz/ai-devops-bot.git ai-devops-bot
     cd ai-devops-bot
     ```
 
-2.  **Crear el archivo `docker-compose.yml`**:
-    Crea el archivo de configuración de Compose en el directorio clonado:
+2.  **Crear el archivo `docker-compose.yml`** dentro de esa carpeta:
     ```yaml
     version: "3.8"
 
@@ -162,19 +167,35 @@ POLL_INTERVAL_SECONDS=60
           - .env
     ```
 
-3.  **Iniciar desde la interfaz de Dockge**:
-    *   Abre la interfaz web de **Dockge**.
-    *   Selecciona el stack **`ai-devops-bot`** detectado automáticamente en la barra lateral.
-    *   Haz clic en **Edit** (Editar).
-    *   Crea o edita la sección del archivo **`.env`** en el editor de Dockge y añade tus credenciales.
-    *   Haz clic en **Save** y luego en **Active** (Activar). Dockge compilará la imagen de forma local y arrancará el contenedor.
+3.  **Iniciar en Dockge**:
+    *   Abre la web de **Dockge** y verás el stack `ai-devops-bot` inactivo en la barra lateral.
+    *   Haz clic en él, pulsa **Edit**, añade tus credenciales en el apartado **`.env`** y haz clic en **Save** y luego en **Active**.
 
-4.  **Actualizar el bot**:
-    Cuando subas cambios a GitHub, solo ejecuta en tu servidor:
-    ```bash
-    cd /opt/stacks/ai-devops-bot && git pull
+---
+
+#### Método 2: Despliegue Directo desde la Web (Recomendado para repositorios Públicos)
+
+Si tu repositorio es público, no necesitas clonar nada por SSH en tu servidor. Puedes indicarle a Dockge que construya la imagen directamente leyendo tu repositorio de GitHub desde internet:
+
+1.  Abre la web de **Dockge** y haz clic en **Compose** (Componer).
+2.  Dale el nombre `ai-devops-bot` en **Stack Name**.
+3.  En el editor web de `docker-compose.yml`, pega lo siguiente:
+    ```yaml
+    version: "3.8"
+
+    services:
+      log-analyzer:
+        build:
+          context: https://github.com/snchz/ai-devops-bot.git#main
+          dockerfile: Dockerfile
+        container_name: loki-gemini-bot
+        restart: unless-stopped
+        env_file:
+          - .env
     ```
-    Y haz clic en **Restart** en la UI de Dockge para reconstruir la imagen con la última versión del código.
+4.  Crea tu archivo **`.env`** en la pestaña correspondiente a la derecha con tus credenciales.
+5.  Haz clic en **Save** y **Active**. ¡Dockge descargará tu código en memoria, construirá la imagen y levantará el bot!
+
 
 ---
 
