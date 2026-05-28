@@ -21,15 +21,20 @@ import requests
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-# Setup logging
+# Setup logging dynamically based on environment
+load_dotenv()  # Load here to have log level configuration early
+log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger("LogAnalyzerBot")
+
 
 
 class Config:
@@ -56,7 +61,10 @@ class Config:
         if not self.gemini_api_key:
             raise ValueError("GEMINI_API_KEY es obligatorio en la configuración.")
             
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        
         # Telegram Configuration
+
         self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
         if not self.telegram_bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN es obligatorio en la configuración.")
@@ -183,10 +191,11 @@ class GeminiClient:
         
         try:
             self.model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
+                model_name=config.gemini_model,
                 system_instruction=self.system_instruction
             )
-            logger.info("Cliente de Gemini inicializado correctamente con el modelo gemini-1.5-flash.")
+            logger.info(f"Cliente de Gemini inicializado correctamente con el modelo {config.gemini_model}.")
+
         except Exception as e:
             logger.error(f"Error al inicializar el modelo de Gemini: {e}")
             self.model = None
@@ -346,9 +355,13 @@ class LogMonitor:
         
         fetched_logs = self.loki.fetch_logs(start_ns=query_start_ns)
         
+        total_fetched = len(fetched_logs) if fetched_logs else 0
+        logger.info(f"Sondeo de Loki completado. Logs recuperados en el búfer temporal: {total_fetched}")
+        
         if not fetched_logs:
             logger.info("No se recibieron logs de Loki en este ciclo.")
             return
+
 
         # Filtering step: only logs strictly newer than last_processed_timestamp_ns
         new_logs = [log for log in fetched_logs if log["timestamp_ns"] > self.last_processed_timestamp_ns]
