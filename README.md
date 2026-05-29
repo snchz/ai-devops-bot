@@ -82,8 +82,8 @@ LOKI_URL=http://192.168.0.5:3100
 # Optional: Loki Basic Auth Credentials (leave blank if not required)
 LOKI_USER=
 LOKI_PASSWORD=
-# Optional: Custom Loki LogQL Query (default excludes bot, loki, and internal_logs)
-# LOKI_QUERY={job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"
+# Optional: Custom Loki LogQL Query (default excludes bot, loki, internal_logs, and ignores level=info/debug)
+# LOKI_QUERY={job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot" !~ "(?i)level=\"?info\"\b" !~ "(?i)level=\"?debug\"\b"
 
 # Logging Format (TEXT or JSON)
 LOG_FORMAT=TEXT
@@ -289,8 +289,8 @@ LOKI_URL=http://192.168.0.5:3100
 # Opcional: Credenciales para Basic Auth en Loki (dejar en blanco si no se requiere)
 LOKI_USER=
 LOKI_PASSWORD=
-# Opcional: Query personalizada de Loki (Excluye por defecto al bot y a Loki para evitar bucles)
-# LOKI_QUERY={job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"
+# Opcional: Query personalizada de Loki (Excluye por defecto al bot, Loki y logs de nivel info/debug)
+# LOKI_QUERY={job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot" !~ "(?i)level=\"?info\"\b" !~ "(?i)level=\"?debug\"\b"
 
 # Formato de Logs (TEXT o JSON)
 LOG_FORMAT=TEXT

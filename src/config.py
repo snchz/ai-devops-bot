@@ -19,7 +19,8 @@ class Config:
         
         # Loki Query: default matches errors, fatals, and panics across non-empty jobs
         # Excludes the bot itself, Loki, and duplicate internal_logs to prevent duplicate logging
-        self.loki_query = os.getenv("LOKI_QUERY", '{job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot"')
+        # Also filters out level=info and level=debug logs to avoid false positives
+        self.loki_query = os.getenv("LOKI_QUERY", r'{job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot" !~ "(?i)level=\"?info\"?\b" !~ "(?i)level=\"?debug\"?\b"')
         
         # Log Format Configuration
         self.log_format = os.getenv("LOG_FORMAT", "TEXT").upper().strip()

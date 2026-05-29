@@ -1,3 +1,4 @@
+import re
 import time
 import asyncio
 from datetime import datetime, timezone
@@ -20,6 +21,54 @@ class LogMonitor:
         self.kb = KnowledgeBase(config.kb_path)
         self.last_processed_timestamp_ns: Optional[int] = None
         self.sent_alerts = {}  # In-memory mapping of alert_key -> timestamp
+
+    def _is_ignored_level(self, log: Dict[str, Any]) -> bool:
+        """
+        Determines if a log item has an informational/debug/trace level and should be ignored,
+        even if it matched the LOKI_QUERY (e.g. contains 'Error' in another context like 'Error: <nil>').
+        """
+        message = log.get("message", "")
+        labels = log.get("labels", {})
+
+        # 1. Check labels for level/severity/loglevel
+        for k, v in labels.items():
+            if k.lower() in ("level", "severity", "loglevel"):
+                if v.lower() in ("info", "debug", "trace", "informational"):
+                    return True
+
+        # 2. Check message content for explicit level indicators
+        # Logfmt style: level=info, level="info", severity=info, loglevel=info
+        logfmt_pattern = r'\b(level|severity|loglevel)\s*=\s*[\'"]?(info|debug|trace|informational)[\'"]?\b'
+        if re.search(logfmt_pattern, message, re.IGNORECASE):
+            # To avoid dropping an error that was nested in an info log,
+            # check if there's also an explicit level=error/warn in the message.
+            has_error_level = re.search(r'\b(level|severity|loglevel)\s*=\s*[\'"]?(error|warn|warning|fatal|panic|crit|critical|emerg|emergency)[\'"]?\b', message, re.IGNORECASE)
+            has_bracket_error = re.search(r'\[(error|warn|warning|fatal|panic|crit|critical|emerg|emergency)\]', message, re.IGNORECASE)
+            if not (has_error_level or has_bracket_error):
+                return True
+
+        # JSON style: "level": "info", "severity": "info"
+        json_pattern = r'"(level|severity|loglevel)"\s*:\s*[\'"]?(info|debug|trace|informational)[\'"]?'
+        if re.search(json_pattern, message, re.IGNORECASE):
+            has_error_json = re.search(r'"(level|severity|loglevel)"\s*:\s*[\'"]?(error|warn|warning|fatal|panic|crit|critical|emerg|emergency)[\'"]?', message, re.IGNORECASE)
+            if not has_error_json:
+                return True
+
+        # Bracket style: [INFO], [DEBUG], [TRACE]
+        bracket_pattern = r'\[(info|debug|trace|informational)\]'
+        if re.search(bracket_pattern, message, re.IGNORECASE):
+            has_error_bracket = re.search(r'\[(error|warn|warning|fatal|panic|crit|critical|emerg|emergency)\]', message, re.IGNORECASE)
+            if not has_error_bracket:
+                return True
+
+        # Standard prefix/colon style: INFO: or DEBUG: or TRACE:
+        prefix_pattern = r'\b(info|debug|trace)\s*:\s+'
+        if re.search(prefix_pattern, message, re.IGNORECASE):
+            has_error_prefix = re.search(r'\b(error|warn|warning|fatal|panic|crit|critical)\s*:\s+', message, re.IGNORECASE)
+            if not has_error_prefix:
+                return True
+
+        return False
 
     async def establish_baseline(self):
         """Queries Loki for the last 5 minutes to find the most recent log timestamp to avoid historical spam."""
@@ -89,10 +138,17 @@ class LogMonitor:
             logger.info("No se recibieron logs de Loki en este ciclo.")
             return
 
-        new_logs = [log for log in fetched_logs if log["timestamp_ns"] > self.last_processed_timestamp_ns]
+        new_logs = []
+        for log in fetched_logs:
+            if log["timestamp_ns"] <= self.last_processed_timestamp_ns:
+                continue
+            if self._is_ignored_level(log):
+                logger.debug(f"Ignorando log informativo/debug: {log['message'][:80]}")
+                continue
+            new_logs.append(log)
         
         if not new_logs:
-            logger.info("No hay nuevos logs de error desde la última iteración.")
+            logger.info("No hay nuevos logs de error/alerta desde la última iteración.")
             return
             
         logger.info(f"Detectados {len(new_logs)} nuevos logs de error.")
