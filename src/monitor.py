@@ -209,13 +209,22 @@ class LogMonitor:
         matched_rules = self.kb.match_logs(flat_unique_logs)
         
         # 4. Analyze logs in batch, injecting custom solutions if rules were matched
-        analysis = await self.gemini.analyze_logs(filtered_grouped_logs, matched_rules)
+        try:
+            analysis = await self.gemini.analyze_logs(filtered_grouped_logs, matched_rules)
+        except Exception as ai_err:
+            logger.error(f"Excepción al invocar el proveedor de IA: {ai_err}")
+            analysis = None
         
         if not analysis:
-            logger.error("No se pudo obtener el análisis de la IA. Se reintentará en el próximo ciclo.")
-            return
-            
-        METRICS["alerts_sent"] += 1
+            logger.warning("No se pudo obtener el análisis de la IA. Registrando incidente con propuesta de fallback.")
+            analysis = (
+                "⚠️ **[ERROR DE PROVEEDOR DE IA]**\n\n"
+                "El bot no pudo obtener un diagnóstico automatizado del proveedor de Inteligencia Artificial seleccionado "
+                "(verifica tu `AI_PROVIDER` y `API_KEY` en la configuración del archivo `.env`).\n\n"
+                "Puedes consultar el detalle del error en los logs originales del contenedor mostrados arriba."
+            )
+        else:
+            METRICS["alerts_sent"] += 1
             
         # Save incident to database (register or update recurrence of each unique error in the database)
         for app, items in filtered_grouped_logs.items():
