@@ -1230,3 +1230,105 @@ body {
 .empty-state p {
     font-size: 13px;
 }
+
+/* --------------------------------------------------
+   Phase 2: Incident States & Timeline styling
+   -------------------------------------------------- */
+
+/* Incident Status Badges */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 800;
+    padding: 3px 10px;
+    border-radius: var(--border-radius-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-badge.status-open {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: var(--theme-danger);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.status-badge.status-resolved {
+    background-color: rgba(16, 185, 129, 0.1);
+    color: var(--theme-success);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.status-badge.status-closed {
+    background-color: rgba(107, 114, 128, 0.15);
+    color: var(--text-secondary);
+    border: 1px solid rgba(107, 114, 128, 0.3);
+}
+
+/* Recurrence History Timeline */
+.timeline-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    position: relative;
+    padding-left: 20px;
+    border-left: 2px solid rgba(255, 255, 255, 0.05);
+    margin-left: 8px;
+    margin-top: 10px;
+}
+
+.timeline-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -27px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: #374151;
+    border: 2px solid var(--bg-card);
+}
+
+.timeline-item.reopen::before {
+    background-color: var(--theme-warning);
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+}
+
+.timeline-item.create::before {
+    background-color: var(--accent-primary);
+}
+
+.timeline-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+.timeline-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.timeline-desc {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    background-color: #0b0f19;
+    padding: 6px 10px;
+    border-radius: 4px;
+    margin-top: 4px;
+    word-break: break-all;
+}
+
+select {
+    color-scheme: dark;
+}
+

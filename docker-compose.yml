@@ -12,5 +12,4 @@ services:
     env_file:
       - .env
     volumes:
-      - ./knowledge_base.json:/app/knowledge_base.json
       - ./history.db:/app/history.db

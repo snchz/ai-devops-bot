@@ -151,6 +151,40 @@ class WebServer:
             await writer.drain()
             return
             
+        elif path.startswith("/api/incidents/") and path.endswith("/resolve") and method == "POST":
+            # Resolve incident endpoint
+            try:
+                incident_id = int(path.split("/")[-2])
+                payload = json.loads(body.decode("utf-8"))
+                
+                kb_rule = payload.get("kb_rule")
+                if not kb_rule:
+                    pattern = payload.get("kb_pattern", "")
+                    rules = self.db.get_kb_rules()
+                    kb_rule = next((r for r in rules if r["pattern"].lower() == pattern.lower()), None)
+                    
+                if not kb_rule:
+                    resp_body = b'{"error": "Knowledge Base rule not found"}'
+                    writer.write(self._make_response(404, "Not Found", "application/json", resp_body))
+                    await writer.drain()
+                    return
+                    
+                success = self.db.resolve_incident(incident_id, kb_rule)
+                if success:
+                    resp_body = b'{"success": true}'
+                    writer.write(self._make_response(200, "OK", "application/json", resp_body))
+                else:
+                    resp_body = b'{"error": "Incident not found"}'
+                    writer.write(self._make_response(404, "Not Found", "application/json", resp_body))
+            except ValueError:
+                resp_body = b'{"error": "Invalid incident ID"}'
+                writer.write(self._make_response(400, "Bad Request", "application/json", resp_body))
+            except Exception as ex:
+                resp_body = f'{{"error": "{str(ex)}"}}'.encode("utf-8")
+                writer.write(self._make_response(500, "Internal Server Error", "application/json", resp_body))
+            await writer.drain()
+            return
+            
         elif path.startswith("/api/incidents/") and method == "DELETE":
             # Extract Incident ID
             try:
@@ -168,15 +202,9 @@ class WebServer:
             await writer.drain()
             return
 
-        # 3. REST API: KNOWLEDGE BASE RULES
+        # 3. REST API: KNOWLEDGE BASE RULES (Consolidated SQLite CRUD)
         elif path == "/api/kb" and method == "GET":
-            rules = []
-            if os.path.exists(self.kb_path):
-                try:
-                    with open(self.kb_path, "r", encoding="utf-8") as f:
-                        rules = json.load(f)
-                except Exception as e:
-                    logger.error(f"Error al leer base de conocimientos en API: {e}")
+            rules = self.db.get_kb_rules()
             resp_body = json.dumps(rules, ensure_ascii=False).encode("utf-8")
             writer.write(self._make_response(200, "OK", "application/json", resp_body))
             await writer.drain()
@@ -190,8 +218,6 @@ class WebServer:
                 cause = payload.get("cause", "").strip()
                 solution = payload.get("solution", "").strip()
                 commands = payload.get("commands", "").strip()
-                
-                # Check for editing a rule (we pass `original_pattern` in payload if we are editing)
                 original_pattern = payload.get("original_pattern", "").strip()
                 
                 if not pattern or not solution:
@@ -200,48 +226,13 @@ class WebServer:
                     await writer.drain()
                     return
                     
-                rules = []
-                if os.path.exists(self.kb_path):
-                    try:
-                        with open(self.kb_path, "r", encoding="utf-8") as f:
-                            rules = json.load(f)
-                    except Exception:
-                        pass
-                
-                updated = False
-                
-                # If we are editing, look for the original pattern
-                search_pattern = original_pattern if original_pattern else pattern
-                
-                for rule in rules:
-                    if rule.get("pattern", "").lower() == search_pattern.lower():
-                        # Update fields
-                        rule["pattern"] = pattern
-                        rule["description"] = description
-                        rule["cause"] = cause
-                        rule["solution"] = solution
-                        rule["commands"] = commands
-                        updated = True
-                        break
-                        
-                if not updated:
-                    # Append new rule
-                    rules.append({
-                        "pattern": pattern,
-                        "description": description,
-                        "cause": cause,
-                        "solution": solution,
-                        "commands": commands
-                    })
-                    
-                # Write back safely
-                with open(self.kb_path, "w", encoding="utf-8") as f:
-                    json.dump(rules, f, indent=2, ensure_ascii=False)
-                    
-                logger.info(f"💾 Regla de conocimiento guardada vía Web UI: '{pattern}'")
-                resp_body = b'{"success": true}'
-                writer.write(self._make_response(200, "OK", "application/json", resp_body))
-                
+                success = self.db.save_kb_rule(pattern, description, cause, solution, commands, original_pattern)
+                if success:
+                    resp_body = b'{"success": true}'
+                    writer.write(self._make_response(200, "OK", "application/json", resp_body))
+                else:
+                    resp_body = b'{"error": "Database operation failed"}'
+                    writer.write(self._make_response(500, "Internal Server Error", "application/json", resp_body))
             except Exception as ex:
                 logger.error(f"Error procesando guardado de KB: {ex}")
                 resp_body = f'{{"error": "{str(ex)}"}}'.encode("utf-8")
@@ -258,21 +249,8 @@ class WebServer:
                 await writer.drain()
                 return
                 
-            rules = []
-            if os.path.exists(self.kb_path):
-                try:
-                    with open(self.kb_path, "r", encoding="utf-8") as f:
-                        rules = json.load(f)
-                except Exception:
-                    pass
-                    
-            original_len = len(rules)
-            rules = [r for r in rules if r.get("pattern", "").lower() != pattern_to_del.lower()]
-            
-            if len(rules) < original_len:
-                with open(self.kb_path, "w", encoding="utf-8") as f:
-                    json.dump(rules, f, indent=2, ensure_ascii=False)
-                logger.info(f"🗑️ Regla de conocimiento eliminada vía Web UI: '{pattern_to_del}'")
+            success = self.db.delete_kb_rule(pattern_to_del)
+            if success:
                 resp_body = b'{"success": true}'
                 writer.write(self._make_response(200, "OK", "application/json", resp_body))
             else:
@@ -283,7 +261,6 @@ class WebServer:
 
         # 4. STATIC FILE WEB SERVER
         else:
-            # Map '/' to '/index.html'
             file_path_rel = path.lstrip("/")
             if not file_path_rel or file_path_rel == "":
                 file_path_rel = "index.html"
@@ -298,7 +275,6 @@ class WebServer:
             full_file_path = os.path.join(self.web_dir, clean_path)
             
             if os.path.exists(full_file_path) and os.path.isfile(full_file_path):
-                # Guess content type
                 ext = os.path.splitext(full_file_path)[1].lower()
                 content_types = {
                     ".html": "text/html",
@@ -315,7 +291,6 @@ class WebServer:
                 c_type = content_types.get(ext, "application/octet-stream")
                 
                 try:
-                    # Async read in standard loop thread
                     with open(full_file_path, "rb") as f:
                         file_content = f.read()
                     writer.write(self._make_response(200, "OK", c_type, file_content))
@@ -323,7 +298,6 @@ class WebServer:
                     logger.error(f"Error leyendo archivo estático {clean_path}: {file_err}")
                     writer.write(self._make_response(500, "Internal Server Error", "text/plain", b"Error reading file"))
             else:
-                # File not found
                 writer.write(self._make_response(404, "Not Found", "text/plain", b"File Not Found"))
             await writer.drain()
             return
@@ -331,7 +305,6 @@ class WebServer:
     async def start(self):
         """Starts the server listener on the specified port."""
         try:
-            # Create web folder if it doesn't exist (to avoid server crashing)
             if not os.path.exists(self.web_dir):
                 os.makedirs(self.web_dir, exist_ok=True)
                 

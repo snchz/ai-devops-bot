@@ -115,17 +115,42 @@
                         <div id="detail-content" class="detail-container hide">
                             <div class="detail-header-panel">
                                 <div class="detail-title-area">
+                                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+                                        <h2 id="detail-incident-num" style="font-size: 20px; font-weight: 800; color: #38bdf8; font-family: var(--font-mono);">INC-0000</h2>
+                                        <span id="detail-status-badge" class="status-badge">ABIERTA</span>
+                                    </div>
                                     <div class="app-badges-list" id="detail-app-badges">
                                         <!-- badges -->
                                     </div>
                                     <span class="detail-timestamp" id="detail-time"></span>
                                 </div>
-                                <button id="btn-delete-incident" class="btn btn-danger-icon" title="Eliminar este incidente del historial">
-                                    <i data-lucide="trash-2"></i>
-                                </button>
+                                <div style="display: flex; gap: 8px;">
+                                    <button id="btn-resolve-incident" class="btn btn-primary" title="Marcar este incidente como resuelto">
+                                        <i data-lucide="shield-check"></i>
+                                        <span>Resolver</span>
+                                    </button>
+                                    <button id="btn-delete-incident" class="btn btn-danger-icon" title="Eliminar este incidente del historial">
+                                        <i data-lucide="trash-2"></i>
+                                    </button>
+                                </div>
                             </div>
                             
                             <div class="detail-body-scroll">
+                                <!-- Applied KB Rule Card (For resolved incidents) -->
+                                <div id="detail-applied-kb-card" class="detail-section-card hide">
+                                    <div class="section-card-title" style="border-bottom-color: rgba(16, 185, 129, 0.15);">
+                                        <i data-lucide="check-check" style="color: var(--theme-success);"></i>
+                                        <h3 style="color: var(--theme-success);">Solución Aplicada</h3>
+                                    </div>
+                                    <div class="section-card-content">
+                                        <div class="matched-rule-item" style="background-color: rgba(16, 185, 129, 0.04); border-color: rgba(16, 185, 129, 0.2);">
+                                            <div class="matched-rule-title" style="color: var(--theme-success); font-size: 13px;" id="detail-applied-kb-title">Solución</div>
+                                            <p id="detail-applied-kb-desc" style="font-size: 12px; margin-bottom: 6px;"></p>
+                                            <p id="detail-applied-kb-sol" style="font-size: 12px; color: var(--text-secondary);"></p>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- Raw Error Logs Card -->
                                 <div class="detail-section-card">
                                     <div class="section-card-title">
@@ -143,11 +168,24 @@
                                 <div id="detail-kb-rules-card" class="detail-section-card hide">
                                     <div class="section-card-title">
                                         <i data-lucide="sparkles"></i>
-                                        <h3>Reglas del Mapa de Conocimiento Aplicadas</h3>
+                                        <h3>Reglas del Mapa de Conocimiento Aplicadas en Detección</h3>
                                     </div>
                                     <div class="section-card-content">
                                         <div class="matched-kb-container" id="detail-kb-rules-list">
                                             <!-- rules -->
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Reopenings / Recurrence History Timeline -->
+                                <div id="detail-history-card" class="detail-section-card hide">
+                                    <div class="section-card-title">
+                                        <i data-lucide="history"></i>
+                                        <h3>Historial de Recurrencias y Reaperturas</h3>
+                                    </div>
+                                    <div class="section-card-content">
+                                        <div class="timeline-container" id="detail-history-timeline">
+                                            <!-- Dynamic timeline items -->
                                         </div>
                                     </div>
                                 </div>
@@ -332,6 +370,37 @@
                 <div class="modal-footer">
                     <button type="button" id="btn-cancel-modal" class="btn btn-secondary">Cancelar</button>
                     <button type="submit" class="btn btn-primary">Guardar Regla</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dialog / Modal for Resolving an Incident -->
+    <div id="resolve-modal" class="modal-overlay hide">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h2>Resolver Incidente 🛡️</h2>
+                <button id="btn-close-resolve-modal" class="btn-close">&times;</button>
+            </div>
+            <form id="resolve-form">
+                <input type="hidden" id="field-resolve-incident-id">
+                
+                <div class="form-group">
+                    <label for="field-resolve-kb-rule">Selecciona la Solución Aplicada del Mapa *</label>
+                    <div style="display: flex; gap: 10px; align-items: center; margin-top: 6px;">
+                        <select id="field-resolve-kb-rule" required style="flex: 1; background-color: rgba(8, 12, 20, 0.5); border: 1px solid var(--border-crystal); color: var(--text-primary); padding: 10px 14px; border-radius: var(--border-radius-md); font-size: 13px; outline: none; border-color: rgba(255,255,255,0.08);">
+                            <!-- Dynamic KB options -->
+                        </select>
+                        <button type="button" id="btn-resolve-create-rule" class="btn btn-secondary" style="white-space: nowrap; padding: 10px 14px;">
+                            <i data-lucide="plus"></i> Nueva Regla
+                        </button>
+                    </div>
+                    <span class="form-help">Para resolver un incidente, debes indicar cuál regla de tu mapa de conocimientos solucionó la falla. Si no existe, créala pulsando "Nueva Regla".</span>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" id="btn-cancel-resolve-modal" class="btn btn-secondary">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Confirmar Resolución</button>
                 </div>
             </form>
         </div>

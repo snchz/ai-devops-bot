@@ -1,25 +1,15 @@
-import os
-import json
 from typing import List, Dict, Any
 from src.logger import logger
 
 class KnowledgeBase:
-    """Manages local RAG rules loaded dynamically from a JSON file."""
+    """Manages local RAG rules loaded dynamically from the SQLite database."""
     
-    def __init__(self, path: str):
-        self.path = path
+    def __init__(self, db):
+        self.db = db
         
     def load_rules(self) -> List[Dict[str, Any]]:
-        """Loads and returns troubleshooting rules from JSON file in real-time."""
-        if not os.path.exists(self.path):
-            logger.debug(f"Base de conocimientos {self.path} no encontrada. Retornando lista vacía.")
-            return []
-        try:
-            with open(self.path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Error al leer base de conocimientos en {self.path}: {e}")
-            return []
+        """Loads and returns troubleshooting rules from SQLite in real-time."""
+        return self.db.get_kb_rules()
             
     def match_logs(self, unique_logs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """

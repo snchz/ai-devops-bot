@@ -45,6 +45,10 @@ graph TD
 
 ## ✨ Main Features
 
+*   **Asynchronous Web Control Center (Web UI)**: A premium, dark-themed, glassmorphic dashboard served natively on `HEALTHCHECK_PORT` (default `8000`) with zero external Python dependencies.
+*   **Full-Detail Incident Explorer**: View untruncated raw error log streams from Grafana Loki along with the AI's diagnostic proposal (complete with one-click code copy buttons) in a gorgeous side-by-side split screen view, bypassing all size limitations of Telegram.
+*   **Interactive RAG Knowledge Base Editor**: A fully interactive Web UI to Add, Edit, or Delete custom troubleshooting patterns and resolution commands in `knowledge_base.json` with instant real-time reloading.
+*   **SQLite Incident History Persistence**: Uses a local SQLite database (`history.db`) to record log telemetry history across restarts.
 *   **Fully Asynchronous Engine**: Built completely on `asyncio` and `httpx` for non-blocking concurrent log processing, health monitoring, and Telegram messaging.
 *   **Secure Self-Healing Subprocess Execution**: Click `[ Ejecutar Solución ⚡ ]` directly on Telegram alerts to trigger remote shell resolution commands in a 30s async subprocess!
 *   **Operator Authentication Access Control**: Enforces whitelisting via `TELEGRAM_ALLOWED_USER_IDS` to securely block unauthorized execution from arbitrary Telegram users.
@@ -194,7 +198,7 @@ git push
 3.  Under **Change visibility**, change it to **Public** and save. *(Completely secure, credentials stay in your server's local `.env`)*.
 
 #### Step 3: Configure in Dockge
-Change your compose file to use the compiled package image rather than building it locally:
+Change your compose file to expose the Web UI port (e.g. `8000`) and mount both `knowledge_base.json` (as read-write) and `history.db` (for incident history persistence) in your server's host folder:
 
 ```yaml
 version: "3.8"
@@ -204,12 +208,31 @@ services:
     image: ghcr.io/snchz/ai-devops-bot:latest
     container_name: ai-devops-bot
     restart: unless-stopped
+    ports:
+      - "8000:8000"  # Expose the Web UI / Prometheus metrics (change host port if 8000 is occupied, e.g. "8080:8000")
     env_file:
       - .env
     volumes:
-      - ./knowledge_base.json:/app/knowledge_base.json:ro
+      - /home/leif/docker/configs/ai-devops-bot/knowledge_base.json:/app/knowledge_base.json
+      - /home/leif/docker/configs/ai-devops-bot/history.db:/app/history.db
 ```
 Click **Save**, then **Active**.
+
+> [!CAUTION]
+> **Host Files & Permissions Troubleshooting:**
+> 1. **Avoid Directory Creation Bug**: If `history.db` or `knowledge_base.json` do not exist as files on your host server when starting the container, **Docker will create them as directories**, crashing the bot with `unable to start container process... not a directory` errors.
+>    * To fix/prevent this, execute these commands on your host server before starting the container:
+>      ```bash
+>      rm -rf /home/leif/docker/configs/ai-devops-bot/history.db
+>      rm -rf /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
+>      touch /home/leif/docker/configs/ai-devops-bot/history.db
+>      echo '[]' > /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
+>      ```
+> 2. **Resolve SQLite "Unable to Open Database File" Error**: Since the container runs under a non-root `appuser` (UID `10001`), it must have read-write access to these host files. Grant correct permissions by running:
+>    ```bash
+>    chmod 666 /home/leif/docker/configs/ai-devops-bot/history.db
+>    chmod 666 /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
+>    ```
 
 #### Step 4: Let Watchtower do the magic
 Since you have **Watchtower** running, it will automatically poll GHCR. When it detects your push triggered a new image build, Watchtower pulls it in the background and restarts `ai-devops-bot` transparently.
@@ -250,8 +273,16 @@ graph TD
 3.  **Sondeo Antibucles e Ingestión**: El bot realiza peticiones periódicas a Loki. Aplica un filtro LogQL avanzado para **ignorar sus propios logs y los logs de auditoría de Loki**, evitando bucles de retroalimentación infinita.
 4.  **Deduplicación en Memoria**: Mantiene en memoria el timestamp en nanosegundos del último log procesado. Compensa el retraso de ingesta de Loki consultando una ventana de seguridad en el pasado, discriminando duplicados en memoria.
 5.  **Limpiador de códigos ANSI**: Limpia automáticamente los códigos de escape de color de consola ANSI (`\x1b\[[0-9;]*[a-zA-Z]`) de los logs, produciendo un Markdown de Telegram muy limpio y permitiendo una deduplicación perfecta de las trazas de Docker.
-6.  **IA Local RAG (Base de Conocimientos)**: Parsea una base de conocimientos local `knowledge_base.json`. Si un error coincide con un patrón (ej. `pvpc_hourly_pricing`), **inyecta tus notas de diagnóstico y tus comandos bash de soluc## ✨ Características Principales
+6.  **IA Local RAG (Base de Conocimientos)**: Parsea una base de conocimientos local `knowledge_base.json`. Si un error coincide con un patrón (ej. `pvpc_hourly_pricing`), **inyecta tus notas de diagnóstico y tus comandos bash de solución directamente en el prompt del modelo de IA**, priorizando tu conocimiento técnico sobre las sugerencias del modelo.
 
+---
+
+## ✨ Características Principales
+
+*   **Centro de Control Web Asíncrono (Web UI)**: Un panel de control premium con estética oscura y *glassmorphic* servido de forma nativa en `HEALTHCHECK_PORT` (por defecto `8000`) sin dependencias de librerías externas de Python.
+*   **Explorador de Incidentes a Detalle Completo**: Visualiza de forma paralela el flujo de logs de error completo de Loki y el diagnóstico de la IA con formato Markdown enriquecido (con copia en un clic de comandos de consola), omitiendo el límite de 4000 caracteres de Telegram.
+*   **Editor Visual del Mapa de Conocimiento**: Modales interactivos para Añadir, Modificar o Eliminar de forma dinámica las reglas del RAG local en `knowledge_base.json` con recarga automática instantánea en caliente.
+*   **Persistencia Histórica de Incidentes en SQLite**: Utiliza una base de datos local SQLite (`history.db`) para almacenar todo el historial de alertas detectadas de forma permanente.
 *   **Motor Totalmente Asíncrono**: Basado en `asyncio` y `httpx` para un procesamiento de logs, métricas y mensajería ultrarrápido y no bloqueante.
 *   **Autocurado Interactivo Seguro**: Ejecuta comandos de consola remotos directamente pulsando `[ Ejecutar Solución ⚡ ]` en tu chat de Telegram en un subproceso asíncrono con timeout de 30s.
 *   **Control de Acceso mediante Whitelist**: Valida al operador mediante `TELEGRAM_ALLOWED_USER_IDS` bloqueando ejecuciones de usuarios de Telegram no autorizados.
@@ -407,7 +438,7 @@ git push
 3.  Bajo **Change visibility**, selecciónalo como **Public** (Público) y guarda. *(Es seguro ya que las credenciales van en tu `.env` local, no en la imagen).*
 
 #### Paso 3: Configurar en Dockge
-Abre **Dockge** y edita tu archivo `docker-compose.yml` para usar la imagen compilada en lugar de construirla localmente:
+Abre **Dockge** y edita tu archivo `docker-compose.yml` para exponer el puerto del panel (ej. `8000`) y mapear en modo lectura y escritura tanto `knowledge_base.json` como la base de datos `history.db`:
 
 ```yaml
 version: "3.8"
@@ -417,12 +448,31 @@ services:
     image: ghcr.io/snchz/ai-devops-bot:latest
     container_name: ai-devops-bot
     restart: unless-stopped
+    ports:
+      - "8000:8000"  # Expone la Web UI / Métricas (si el puerto 8000 está ocupado en tu host, puedes mapear "8080:8000")
     env_file:
       - .env
     volumes:
-      - ./knowledge_base.json:/app/knowledge_base.json:ro
+      - /home/leif/docker/configs/ai-devops-bot/knowledge_base.json:/app/knowledge_base.json
+      - /home/leif/docker/configs/ai-devops-bot/history.db:/app/history.db
 ```
 Haz clic en **Save** y luego en **Active**. 
+
+> [!CAUTION]
+> **Solución de Problemas de Archivos y Permisos en el Host:**
+> 1. **Evitar el error de creación de Carpetas**: Si los archivos `history.db` o `knowledge_base.json` no existen en tu host al arrancar el contenedor, **Docker los creará como directorios**, bloqueando la ejecución con el error `unable to start container process... not a directory`.
+>    * Resuélvelo ejecutando esto en la consola de tu servidor antes de iniciar el contenedor:
+>      ```bash
+>      rm -rf /home/leif/docker/configs/ai-devops-bot/history.db
+>      rm -rf /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
+>      touch /home/leif/docker/configs/ai-devops-bot/history.db
+>      echo '[]' > /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
+>      ```
+> 2. **Resolver el error SQLite "Unable to open database file"**: Debido a que el bot corre de forma segura bajo el usuario no root `appuser` (UID `10001`) dentro del contenedor, necesita permisos completos sobre estos archivos montados. Configura los permisos correctos ejecutando:
+>    ```bash
+>    chmod 666 /home/leif/docker/configs/ai-devops-bot/history.db
+>    chmod 666 /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
+>    ```
 
 #### Paso 4: Dejar que Watchtower trabaje
 Dado que tienes **Watchtower** ejecutándose en tu servidor, este revisará periódicamente tu GitHub Packages. En cuanto detecte que has subido un cambio a GitHub, descargará la nueva imagen automáticamente y reiniciará tu contenedor de `ai-devops-bot` de forma transparente.

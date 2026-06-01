@@ -1,5 +1,5 @@
 // --------------------------------------------------
-// AI DevOps Bot - Main Web Application Logic (SPA)
+// AI DevOps Bot - Main Web Application Logic (SPA) - Phase 2
 // --------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -32,12 +32,21 @@ document.addEventListener("DOMContentLoaded", () => {
     // Incident Details
     const detailPlaceholder = document.getElementById("detail-placeholder");
     const detailContent = document.getElementById("detail-content");
+    const detailIncidentNum = document.getElementById("detail-incident-num");
+    const detailStatusBadge = document.getElementById("detail-status-badge");
     const detailAppBadges = document.getElementById("detail-app-badges");
     const detailTime = document.getElementById("detail-time");
+    const btnResolveIncident = document.getElementById("btn-resolve-incident");
     const btnDeleteIncident = document.getElementById("btn-delete-incident");
     const detailLogsContainer = document.getElementById("detail-logs-container");
     const detailKbrulesCard = document.getElementById("detail-kb-rules-card");
     const detailKbrulesList = document.getElementById("detail-kb-rules-list");
+    const detailHistoryCard = document.getElementById("detail-history-card");
+    const detailHistoryTimeline = document.getElementById("detail-history-timeline");
+    const detailAppliedKbCard = document.getElementById("detail-applied-kb-card");
+    const detailAppliedKbTitle = document.getElementById("detail-applied-kb-title");
+    const detailAppliedKbDesc = document.getElementById("detail-applied-kb-desc");
+    const detailAppliedKbSol = document.getElementById("detail-applied-kb-sol");
     const detailAiProposal = document.getElementById("detail-ai-proposal");
 
     // Knowledge Base Elements
@@ -56,7 +65,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const healthAiProvider = document.getElementById("health-ai-provider");
     const healthPollInterval = document.getElementById("health-poll-interval");
 
-    // Modal Form Elements
+    // Rule Modal Elements (Add & Edit)
     const ruleModal = document.getElementById("rule-modal");
     const btnCloseModal = document.getElementById("btn-close-modal");
     const btnCancelModal = document.getElementById("btn-cancel-modal");
@@ -69,9 +78,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const fieldSolution = document.getElementById("field-solution");
     const fieldCommands = document.getElementById("field-commands");
 
+    // Resolve Incident Modal Elements
+    const resolveModal = document.getElementById("resolve-modal");
+    const btnCloseResolveModal = document.getElementById("btn-close-resolve-modal");
+    const btnCancelResolveModal = document.getElementById("btn-cancel-resolve-modal");
+    const resolveForm = document.getElementById("resolve-form");
+    const fieldResolveIncidentId = document.getElementById("field-resolve-incident-id");
+    const fieldResolveKbRule = document.getElementById("field-resolve-kb-rule");
+    const btnResolveCreateRule = document.getElementById("btn-resolve-create-rule");
+
     // Toast Notification
     const toast = document.getElementById("toast-notification");
     const toastMessage = document.getElementById("toast-message");
+
+    // Flag to handle rule creation directly from resolution modal
+    let isCreatingRuleFromResolve = false;
 
     // --- NAVIGATION LOGIC ---
     function switchView(targetView) {
@@ -147,6 +168,18 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!res.ok) throw new Error("Fallo al consultar incidencias");
             incidents = await res.json();
             renderIncidentsList();
+            
+            // Re-select current active incident to load fresh details if still present
+            if (currentIncidentId) {
+                const currentInc = incidents.find(inc => inc.id === currentIncidentId);
+                if (currentInc) {
+                    selectIncident(currentInc);
+                } else {
+                    currentIncidentId = null;
+                    detailContent.classList.add("hide");
+                    detailPlaceholder.classList.remove("hide");
+                }
+            }
         } catch (err) {
             console.error(err);
             showToast("Error al obtener los incidentes del servidor.", "error");
@@ -162,8 +195,10 @@ document.addEventListener("DOMContentLoaded", () => {
         // Filter incidents
         const filtered = incidents.filter(inc => {
             const matchesApp = inc.apps.some(app => app.toLowerCase().includes(query));
+            const matchesNum = inc.incident_num.toLowerCase().includes(query);
             const matchesProposal = inc.ai_proposal.toLowerCase().includes(query);
-            return matchesApp || matchesProposal;
+            const matchesStatus = inc.status.toLowerCase().includes(query);
+            return matchesApp || matchesNum || matchesProposal || matchesStatus;
         });
 
         listIncidents.innerHTML = "";
@@ -183,19 +218,38 @@ document.addEventListener("DOMContentLoaded", () => {
             card.dataset.id = inc.id;
 
             const appBadges = inc.apps.map(app => `<span class="app-badge">${app}</span>`).join("");
+            
+            // Status Tag styling
+            let statusClass = "status-open";
+            if (inc.status === "RESUELTA") statusClass = "status-resolved";
+            if (inc.status === "CERRADA") statusClass = "status-closed";
+            
+            const statusBadge = `<span class="status-badge ${statusClass}" style="font-size:8px; padding: 1px 6px;">${inc.status}</span>`;
+            
             const kbBadge = inc.matched_rules.length > 0 
                 ? `<span class="kb-badge-tag"><i data-lucide="sparkles" style="width:10px;height:10px;"></i> RAG Match</span>` 
+                : "";
+                
+            const reopenBadge = inc.history.length > 0
+                ? `<span class="kb-badge-tag" style="background-color: rgba(239,68,68,0.06); color:var(--theme-danger); border-color: rgba(239,68,68,0.15);"><i data-lucide="history" style="width:10px;height:10px;"></i> R-${inc.history.length}</span>`
                 : "";
 
             card.innerHTML = `
                 <div class="card-header-row">
-                    <div class="card-apps-badges">${appBadges}</div>
-                    <span class="card-time">${formatTimestamp(inc.timestamp).split(" ")[1] || ""}</span>
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <span style="font-family:var(--font-mono); font-size:11px; font-weight:800; color:var(--text-muted);">${inc.incident_num}</span>
+                        <div class="card-apps-badges">${appBadges}</div>
+                    </div>
+                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+                        <span class="card-time">${formatTimestamp(inc.created_at).split(" ")[1] || ""}</span>
+                        ${statusBadge}
+                    </div>
                 </div>
-                <p>${inc.ai_proposal.substring(0, 140)}...</p>
+                <p style="margin-top:6px;">${inc.ai_proposal.substring(0, 120)}...</p>
                 <div class="card-meta-row">
-                    <span class="card-time">${formatTimestamp(inc.timestamp).split(" ")[0]}</span>
+                    <span class="card-time">${formatTimestamp(inc.created_at).split(" ")[0]}</span>
                     ${kbBadge}
+                    ${reopenBadge}
                 </div>
             `;
 
@@ -219,12 +273,31 @@ document.addEventListener("DOMContentLoaded", () => {
         detailContent.classList.remove("hide");
 
         // Set Headers
+        detailIncidentNum.textContent = inc.incident_num;
+        detailStatusBadge.textContent = inc.status;
+        detailStatusBadge.className = `status-badge ${inc.status === "RESUELTA" ? "status-resolved" : (inc.status === "CERRADA" ? "status-closed" : "status-open")}`;
         detailAppBadges.innerHTML = inc.apps.map(app => `<span class="app-badge-large">${app}</span>`).join("");
-        detailTime.textContent = formatTimestamp(inc.timestamp);
+        detailTime.textContent = formatTimestamp(inc.created_at);
+
+        // Hide or Show "Resolve" Button based on status
+        if (inc.status === "ABIERTA") {
+            btnResolveIncident.classList.remove("hide");
+        } else {
+            btnResolveIncident.classList.add("hide");
+        }
+
+        // Render Applied Solution if Resolved
+        if (inc.status === "RESUELTA" && inc.kb_applied) {
+            detailAppliedKbCard.classList.remove("hide");
+            detailAppliedKbTitle.innerHTML = `<i data-lucide="check-check" style="width:14px; height:14px; display:inline-block; vertical-align:middle; margin-right:4px;"></i> Solución: "${inc.kb_applied.pattern}"`;
+            detailAppliedKbDesc.innerHTML = `<strong>Diagnóstico del Admin:</strong> ${inc.kb_applied.cause || "N/A"}`;
+            detailAppliedKbSol.innerHTML = `<strong>Acción Ejecutada:</strong> ${inc.kb_applied.solution}`;
+        } else {
+            detailAppliedKbCard.classList.add("hide");
+        }
 
         // Render Raw Logs
         detailLogsContainer.innerHTML = "";
-        
         for (const [app, logsList] of Object.entries(inc.logs)) {
             const appBlock = document.createElement("div");
             appBlock.className = "log-app-block";
@@ -241,7 +314,7 @@ document.addEventListener("DOMContentLoaded", () => {
             detailLogsContainer.appendChild(appBlock);
         }
 
-        // Render Matched Knowledge Rules
+        // Render Matched Knowledge Rules in Detection
         if (inc.matched_rules && inc.matched_rules.length > 0) {
             detailKbrulesCard.classList.remove("hide");
             detailKbrulesList.innerHTML = inc.matched_rules.map(rule => `
@@ -253,6 +326,32 @@ document.addEventListener("DOMContentLoaded", () => {
             `).join("");
         } else {
             detailKbrulesCard.classList.add("hide");
+        }
+
+        // Render Recurrence / Reopening Timeline History
+        if (inc.history && inc.history.length > 0) {
+            detailHistoryCard.classList.remove("hide");
+            
+            // Build timeline items
+            let timelineHtml = `
+                <div class="timeline-item create">
+                    <div class="timeline-time">${formatTimestamp(inc.created_at)}</div>
+                    <div class="timeline-title">Primer Registro del Incidente</div>
+                </div>
+            `;
+            
+            inc.history.forEach((h, index) => {
+                timelineHtml += `
+                    <div class="timeline-item reopen">
+                        <div class="timeline-time">${formatTimestamp(h.timestamp)}</div>
+                        <div class="timeline-title">Recurrencia #${index + 1} - Incidente Reabierto</div>
+                        <div class="timeline-desc">${h.message} <span class="log-item-count">(Ocurrencias en ciclo: x${h.count})</span></div>
+                    </div>
+                `;
+            });
+            detailHistoryTimeline.innerHTML = timelineHtml;
+        } else {
+            detailHistoryCard.classList.add("hide");
         }
 
         // Render AI proposal with Marked Markdown Parser
@@ -312,6 +411,109 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (err) {
             console.error(err);
             showToast("Error al intentar eliminar el incidente.", "error");
+        }
+    });
+
+    // --- RESOLVE INCIDENT MODAL LOGIC ---
+    btnResolveIncident.addEventListener("click", () => {
+        if (!currentIncidentId) return;
+        openResolveModal(currentIncidentId);
+    });
+
+    async function openResolveModal(incidentId) {
+        fieldResolveIncidentId.value = incidentId;
+        
+        // Fetch fresh KB rules to populate the select dropdown
+        await fetchKbRulesForResolveDropdown();
+        
+        resolveModal.classList.remove("hide");
+    }
+
+    async function fetchKbRulesForResolveDropdown() {
+        try {
+            const res = await fetch(`${API_BASE}/api/kb`);
+            if (!res.ok) throw new Error("Fallo al cargar base de conocimientos");
+            kbRules = await res.json();
+            
+            fieldResolveKbRule.innerHTML = "";
+            
+            if (kbRules.length === 0) {
+                const opt = document.createElement("option");
+                opt.value = "";
+                opt.textContent = "-- No hay reglas. ¡Crea una nueva! --";
+                fieldResolveKbRule.appendChild(opt);
+                return;
+            }
+            
+            kbRules.forEach(rule => {
+                const opt = document.createElement("option");
+                opt.value = rule.pattern;
+                opt.textContent = `${rule.pattern} (${rule.description || "Sin descripción"})`;
+                fieldResolveKbRule.appendChild(opt);
+            });
+        } catch (err) {
+            console.error(err);
+            showToast("Error al cargar reglas del mapa de conocimientos para resolución.", "error");
+        }
+    }
+
+    function closeResolveModal() {
+        resolveModal.classList.add("hide");
+        isCreatingRuleFromResolve = false;
+    }
+
+    btnCloseResolveModal.addEventListener("click", closeResolveModal);
+    btnCancelResolveModal.addEventListener("click", closeResolveModal);
+
+    // Resolve Submission
+    resolveForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        
+        const incidentId = fieldResolveIncidentId.value;
+        const selectedPattern = fieldResolveKbRule.value;
+        
+        if (!selectedPattern) {
+            showToast("Por favor, selecciona una regla del Mapa de Conocimientos para resolver el incidente.", "error");
+            return;
+        }
+
+        try {
+            const res = await fetch(`${API_BASE}/api/incidents/${incidentId}/resolve`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ kb_pattern: selectedPattern })
+            });
+
+            if (!res.ok) throw new Error("Fallo al resolver incidente");
+            
+            showToast(`Incidente marcado como RESUELTO aplicando regla: "${selectedPattern}"`, "success");
+            closeResolveModal();
+            fetchIncidents();
+        } catch (err) {
+            console.error(err);
+            showToast("Error al intentar resolver el incidente.", "error");
+        }
+    });
+
+    // Create Rule HOT-LINK from Resolve Modal
+    btnResolveCreateRule.addEventListener("click", () => {
+        isCreatingRuleFromResolve = true;
+        // Pre-fill the rule pattern if there are logs loaded
+        const currentInc = incidents.find(inc => inc.id === parseInt(fieldResolveIncidentId.value));
+        
+        openRuleModal();
+        
+        // Auto-fill suggested pattern from app name if possible
+        if (currentInc) {
+            fieldDescription.value = `Solución para error en ${currentInc.apps.join(", ")}`;
+            // Extract a clean piece of the log message to suggest as pattern
+            for (const logsList of Object.values(currentInc.logs)) {
+                if (logsList.length > 0) {
+                    const cleanMsg = logsList[0].message.replace(/[0-9]+|[\w-]{10,}/g, "").substring(0, 45).trim();
+                    fieldPattern.value = cleanMsg || logsList[0].message.substring(0, 30);
+                    break;
+                }
+            }
         }
     });
 
@@ -458,7 +660,15 @@ document.addEventListener("DOMContentLoaded", () => {
             
             showToast("Regla del Mapa de Conocimiento guardada con éxito.", "success");
             closeModal();
-            fetchKbRules();
+            
+            if (isCreatingRuleFromResolve) {
+                // If created from Resolution flow, re-load resolution select and select this rule
+                await fetchKbRulesForResolveDropdown();
+                fieldResolveKbRule.value = payload.pattern;
+                isCreatingRuleFromResolve = false;
+            } else {
+                fetchKbRules();
+            }
         } catch (err) {
             console.error(err);
             showToast("Error al guardar la regla en el servidor.", "error");

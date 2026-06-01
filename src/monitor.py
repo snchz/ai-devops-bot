@@ -20,8 +20,9 @@ class LogMonitor:
         self.loki = LokiClient(config)
         self.gemini = GeminiClient(config)
         self.telegram = TelegramClient(config)
-        self.kb = KnowledgeBase(config.kb_path)
         self.db = Database(config.db_path)
+        self.db.import_legacy_json_rules(config.kb_path)  # Import RAG rules from JSON to SQLite on startup
+        self.kb = KnowledgeBase(self.db)
         self.last_processed_timestamp_ns: Optional[int] = None
         self.sent_alerts = {}  # In-memory mapping of alert_key -> timestamp
 
@@ -130,6 +131,9 @@ class LogMonitor:
         logger.info("Iniciando ciclo de sondeo en Grafana Loki...")
         METRICS["cycles"] += 1
         
+        # 0. Perform auto-closure check for inactive open/resolved incidents (older than 1 week)
+        self.db.auto_close_inactive_incidents()
+        
         safety_window_ns = 2 * 60 * 1_000_000_000
         query_start_ns = self.last_processed_timestamp_ns - safety_window_ns
         
@@ -213,9 +217,10 @@ class LogMonitor:
             logger.error("No se pudo obtener el análisis de la IA. Se reintentará en el próximo ciclo.")
             return
             
-        # Save incident to database (apps list, logs detail, matched rules, and AI analysis)
-        apps = list(filtered_grouped_logs.keys())
-        self.db.save_incident(apps, filtered_grouped_logs, matched_rules, analysis)
+        # Save incident to database (register or update recurrence of each unique error in the database)
+        for app, items in filtered_grouped_logs.items():
+            for item in items:
+                self.db.register_or_recur_incident(app, item, matched_rules, analysis)
             
         # 5. Dispatch Telegram report grouped by application
         telegram_sent = await self.telegram.send_alert(filtered_grouped_logs, matched_rules, analysis)
