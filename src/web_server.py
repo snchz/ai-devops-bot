@@ -76,6 +76,9 @@ class WebServer:
                 if line.lower().startswith("content-length:"):
                     try:
                         content_length = int(line.split(":")[1].strip())
+                        # Safety limit to prevent memory overflow (OOM)
+                        if content_length > 2 * 1024 * 1024:
+                            content_length = 2 * 1024 * 1024
                     except ValueError:
                         pass
                         
@@ -145,7 +148,7 @@ class WebServer:
         # 2. REST API: INCIDENTS HISTORY
         elif path == "/api/incidents" and method == "GET":
             limit = int(query_params.get("limit", "100"))
-            incidents = self.db.get_incidents(limit)
+            incidents = await asyncio.to_thread(self.db.get_incidents, limit)
             resp_body = json.dumps(incidents, ensure_ascii=False).encode("utf-8")
             writer.write(self._make_response(200, "OK", "application/json", resp_body))
             await writer.drain()
@@ -160,7 +163,7 @@ class WebServer:
                 kb_rule = payload.get("kb_rule")
                 if not kb_rule:
                     pattern = payload.get("kb_pattern", "")
-                    rules = self.db.get_kb_rules()
+                    rules = await asyncio.to_thread(self.db.get_kb_rules)
                     kb_rule = next((r for r in rules if r["pattern"].lower() == pattern.lower()), None)
                     
                 if not kb_rule:
@@ -169,7 +172,7 @@ class WebServer:
                     await writer.drain()
                     return
                     
-                success = self.db.resolve_incident(incident_id, kb_rule)
+                success = await asyncio.to_thread(self.db.resolve_incident, incident_id, kb_rule)
                 if success:
                     resp_body = b'{"success": true}'
                     writer.write(self._make_response(200, "OK", "application/json", resp_body))
@@ -189,7 +192,7 @@ class WebServer:
             # Extract Incident ID
             try:
                 incident_id = int(path.split("/")[-1])
-                success = self.db.delete_incident(incident_id)
+                success = await asyncio.to_thread(self.db.delete_incident, incident_id)
                 if success:
                     resp_body = b'{"success": true}'
                     writer.write(self._make_response(200, "OK", "application/json", resp_body))
@@ -204,7 +207,7 @@ class WebServer:
 
         # 3. REST API: KNOWLEDGE BASE RULES (Consolidated SQLite CRUD)
         elif path == "/api/kb" and method == "GET":
-            rules = self.db.get_kb_rules()
+            rules = await asyncio.to_thread(self.db.get_kb_rules)
             resp_body = json.dumps(rules, ensure_ascii=False).encode("utf-8")
             writer.write(self._make_response(200, "OK", "application/json", resp_body))
             await writer.drain()
@@ -226,7 +229,7 @@ class WebServer:
                     await writer.drain()
                     return
                     
-                success = self.db.save_kb_rule(pattern, description, cause, solution, commands, original_pattern)
+                success = await asyncio.to_thread(self.db.save_kb_rule, pattern, description, cause, solution, commands, original_pattern)
                 if success:
                     resp_body = b'{"success": true}'
                     writer.write(self._make_response(200, "OK", "application/json", resp_body))
@@ -249,7 +252,7 @@ class WebServer:
                 await writer.drain()
                 return
                 
-            success = self.db.delete_kb_rule(pattern_to_del)
+            success = await asyncio.to_thread(self.db.delete_kb_rule, pattern_to_del)
             if success:
                 resp_body = b'{"success": true}'
                 writer.write(self._make_response(200, "OK", "application/json", resp_body))

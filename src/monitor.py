@@ -7,19 +7,17 @@ from src.config import Config
 from src.loki import LokiClient
 from src.knowledge_base import KnowledgeBase
 from src.gemini import GeminiClient
-from src.telegram import TelegramClient
 from src.database import Database
 from src.web_server import WebServer
 from src.logger import logger, METRICS
 
 class LogMonitor:
-    """Orchestrator to poll Loki, process logs, get suggestions, and alert via Telegram asynchronously."""
+    """Orchestrator to poll Loki, process logs, and get suggestions asynchronously."""
     
     def __init__(self, config: Config):
         self.config = config
         self.loki = LokiClient(config)
         self.gemini = GeminiClient(config)
-        self.telegram = TelegramClient(config)
         self.db = Database(config.db_path)
         self.db.import_legacy_json_rules(config.kb_path)  # Import RAG rules from JSON to SQLite on startup
         self.kb = KnowledgeBase(self.db)
@@ -132,7 +130,7 @@ class LogMonitor:
         METRICS["cycles"] += 1
         
         # 0. Perform auto-closure check for inactive open/resolved incidents (older than 1 week)
-        self.db.auto_close_inactive_incidents()
+        await asyncio.to_thread(self.db.auto_close_inactive_incidents)
         
         safety_window_ns = 2 * 60 * 1_000_000_000
         query_start_ns = self.last_processed_timestamp_ns - safety_window_ns
@@ -217,20 +215,17 @@ class LogMonitor:
             logger.error("No se pudo obtener el análisis de la IA. Se reintentará en el próximo ciclo.")
             return
             
+        METRICS["alerts_sent"] += 1
+            
         # Save incident to database (register or update recurrence of each unique error in the database)
         for app, items in filtered_grouped_logs.items():
             for item in items:
-                self.db.register_or_recur_incident(app, item, matched_rules, analysis)
+                await asyncio.to_thread(self.db.register_or_recur_incident, app, item, matched_rules, analysis)
             
-        # 5. Dispatch Telegram report grouped by application
-        telegram_sent = await self.telegram.send_alert(filtered_grouped_logs, matched_rules, analysis)
-        
-        if telegram_sent:
-            max_ts = max(log["timestamp_ns"] for log in new_logs)
-            self.last_processed_timestamp_ns = max_ts
-            logger.info(f"Ciclo completado. Último timestamp actualizado a: {max_ts}")
-        else:
-            logger.warning("Fallo el envío a Telegram. No se actualiza el timestamp para reintentar en el próximo ciclo.")
+        # Update last processed timestamp to the latest log seen
+        max_ts = max(log["timestamp_ns"] for log in new_logs)
+        self.last_processed_timestamp_ns = max_ts
+        logger.info(f"Ciclo completado. Último timestamp actualizado a: {max_ts}")
 
     async def polling_loop(self):
         """Infinite polling cycle task."""
@@ -242,78 +237,6 @@ class LogMonitor:
                 
             logger.info(f"Durmiendo el proceso durante {self.config.poll_interval} segundos...")
             await asyncio.sleep(self.config.poll_interval)
-
-    async def start_metrics_server(self, port: int):
-        """Starts a lightweight, fully asynchronous, dependency-free HTTP server for healthchecks and Prometheus metrics."""
-        async def handle_http_request(reader, writer):
-            try:
-                data = await reader.read(1024)
-                if not data:
-                    return
-                request_text = data.decode("utf-8", errors="ignore")
-                lines = request_text.split("\r\n")
-                if not lines:
-                    return
-                
-                req_line = lines[0]
-                parts = req_line.split(" ")
-                if len(parts) < 2:
-                    return
-                    
-                method, path = parts[0], parts[1]
-                
-                if path == "/healthz":
-                    status = 200
-                    body = '{"status": "healthy"}'
-                    content_type = "application/json"
-                elif path == "/metrics":
-                    status = 200
-                    metrics_lines = [
-                        "# HELP ai_devops_bot_cycles_total Total polling cycles completed",
-                        "# TYPE ai_devops_bot_cycles_total counter",
-                        f"ai_devops_bot_cycles_total {METRICS['cycles']}",
-                        "# HELP ai_devops_bot_errors_detected_total Total raw error logs fetched",
-                        "# TYPE ai_devops_bot_errors_detected_total counter",
-                        f"ai_devops_bot_errors_detected_total {METRICS['errors_detected']}",
-                        "# HELP ai_devops_bot_alerts_sent_total Total alerts successfully sent to Telegram",
-                        "# TYPE ai_devops_bot_alerts_sent_total counter",
-                        f"ai_devops_bot_alerts_sent_total {METRICS['alerts_sent']}",
-                        "# HELP ai_devops_bot_commands_executed_total Total commands executed via Telegram buttons",
-                        "# TYPE ai_devops_bot_commands_executed_total counter",
-                        f"ai_devops_bot_commands_executed_total {METRICS['commands_executed']}"
-                    ]
-                    body = "\n".join(metrics_lines) + "\n"
-                    content_type = "text/plain; version=0.0.4"
-                else:
-                    status = 404
-                    body = "Not Found"
-                    content_type = "text/plain"
-                    
-                response = (
-                    f"HTTP/1.1 {status} OK\r\n"
-                    f"Content-Type: {content_type}\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    "Connection: close\r\n\r\n"
-                    f"{body}"
-                )
-                writer.write(response.encode("utf-8"))
-                await writer.drain()
-            except Exception as e:
-                logger.error(f"Error procesando petición HTTP de salud/métricas: {e}")
-            finally:
-                try:
-                    writer.close()
-                    await writer.wait_closed()
-                except Exception:
-                    pass
-
-        try:
-            server = await asyncio.start_server(handle_http_request, "0.0.0.0", port)
-            logger.info(f"Servidor de métricas y healthcheck corriendo en puerto {port}")
-            async with server:
-                await server.serve_forever()
-        except Exception as e:
-            logger.error(f"No se pudo iniciar el servidor de métricas en puerto {port}: {e}")
 
     async def start(self):
         """Starts all concurrent background tasks using asyncio."""
@@ -327,9 +250,7 @@ class LogMonitor:
             logger.info(f"Fijando timestamp de seguridad al tiempo actual por fallo: {self.last_processed_timestamp_ns}")
             
         polling_task = asyncio.create_task(self.polling_loop())
-        telegram_task = asyncio.create_task(self.telegram.poll_updates())
-        
-        tasks = [polling_task, telegram_task]
+        tasks = [polling_task]
         
         if self.config.healthcheck_port:
             web_server = WebServer(self.config.healthcheck_port, self.db, self.config.kb_path)

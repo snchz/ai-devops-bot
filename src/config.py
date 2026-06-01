@@ -53,25 +53,6 @@ class Config:
         elif self.ai_provider == "gemini" and not self.gemini_api_key:
             raise ValueError("GEMINI_API_KEY (o GROQ_API_KEY) es obligatorio para el proveedor 'gemini'.")
         
-        # Telegram Configuration
-        self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        if not self.telegram_bot_token:
-            raise ValueError("TELEGRAM_BOT_TOKEN es obligatorio en la configuración.")
-            
-        self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-        if not self.telegram_chat_id:
-            raise ValueError("TELEGRAM_CHAT_ID es obligatorio en la configuración.")
-            
-        # Telegram Command Execution Security
-        self.telegram_allowed_user_ids = []
-        allowed_str = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")
-        if allowed_str:
-            for uid in allowed_str.split(","):
-                try:
-                    self.telegram_allowed_user_ids.append(int(uid.strip()))
-                except ValueError:
-                    logger.warning(f"ID de usuario de Telegram inválido omitido: '{uid}'")
-            
         # Polling Configuration (Default 60 seconds)
         try:
             self.poll_interval = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
@@ -97,5 +78,9 @@ class Config:
         self.kb_path = os.getenv("KNOWLEDGE_BASE_PATH", "knowledge_base.json")
 
         # Database path
-        self.db_path = os.getenv("DATABASE_PATH", "history.db")
+        self.db_path = os.getenv("DATABASE_PATH", "data/history.db")
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+
 

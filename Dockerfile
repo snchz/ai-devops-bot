@@ -39,7 +39,10 @@ COPY --from=builder /opt/venv /opt/venv
 COPY bot.py knowledge_base.json ./
 COPY src/ ./src/
 
-RUN chown -R appuser:appgroup /app
+# Crear carpeta de datos dedicada para SQLite y volumen persistente
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app /opt/venv
+
+VOLUME /app/data
 
 # Cambiar al usuario no priviligiado
 USER appuser
