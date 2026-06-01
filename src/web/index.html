@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI DevOps Bot - Centro de Control</title>
+    <meta name="description" content="Panel de control avanzado para análisis de logs, diagnóstico de IA y mapa de conocimiento de autocuración.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Marked.js Markdown Parser CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="app-sidebar">
+            <div class="sidebar-header">
+                <div class="logo-area">
+                    <span class="logo-icon">🤖</span>
+                    <div class="logo-text">
+                        <h2>DevOps Bot</h2>
+                        <span>Control RAG Center</span>
+                    </div>
+                </div>
+                <div class="bot-status-container">
+                    <span class="status-indicator pulses"></span>
+                    <span class="status-text">BOT ACTIVO</span>
+                </div>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <button id="nav-dashboard" class="nav-btn active">
+                    <i data-lucide="shield-alert"></i>
+                    <span>Panel de Incidentes</span>
+                </button>
+                <button id="nav-knowledge" class="nav-btn">
+                    <i data-lucide="database"></i>
+                    <span>Mapa de Conocimiento</span>
+                </button>
+                <button id="nav-metrics" class="nav-btn">
+                    <i data-lucide="activity"></i>
+                    <span>Métricas y Salud</span>
+                </button>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="system-time">
+                    <i data-lucide="clock"></i>
+                    <span id="live-time">00:00:00</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="app-main">
+            
+            <!-- Dashboard View -->
+            <section id="view-dashboard" class="content-view active">
+                <div class="view-header">
+                    <div class="header-titles">
+                        <h1>Panel de Incidentes</h1>
+                        <p>Visualiza el historial completo de errores capturados de Loki con análisis RAG detallado sin restricciones.</p>
+                    </div>
+                    <div class="header-actions">
+                        <button id="btn-refresh-incidents" class="btn btn-secondary">
+                            <i data-lucide="refresh-cw"></i>
+                            <span>Actualizar</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Dashboard Layout Grid -->
+                <div class="dashboard-grid">
+                    <!-- Left Column: Incidents List -->
+                    <div class="panel list-panel">
+                        <div class="panel-header">
+                            <div class="search-box">
+                                <i data-lucide="search"></i>
+                                <input type="text" id="incident-search" placeholder="Buscar por aplicación o error...">
+                            </div>
+                        </div>
+                        <div class="panel-body">
+                            <div id="incidents-loader" class="loader-container hide">
+                                <div class="loader"></div>
+                                <p>Cargando incidentes...</p>
+                            </div>
+                            <div id="incidents-empty" class="empty-state hide">
+                                <i data-lucide="check-circle-2"></i>
+                                <h3>¡Sistema Limpio!</h3>
+                                <p>No se han registrado incidentes o alertas de error en la base de datos.</p>
+                            </div>
+                            <div id="incidents-list" class="incident-cards-container">
+                                <!-- Dynamic incident cards go here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Incident Detail View -->
+                    <div class="panel detail-panel">
+                        <div id="detail-placeholder" class="detail-empty-state">
+                            <div class="empty-icon-wrap">
+                                <i data-lucide="eye"></i>
+                            </div>
+                            <h3>Selecciona un Incidente</h3>
+                            <p>Haz clic en cualquier alerta del historial para examinar la traza completa y la sugerencia de la IA.</p>
+                        </div>
+                        
+                        <div id="detail-content" class="detail-container hide">
+                            <div class="detail-header-panel">
+                                <div class="detail-title-area">
+                                    <div class="app-badges-list" id="detail-app-badges">
+                                        <!-- badges -->
+                                    </div>
+                                    <span class="detail-timestamp" id="detail-time"></span>
+                                </div>
+                                <button id="btn-delete-incident" class="btn btn-danger-icon" title="Eliminar este incidente del historial">
+                                    <i data-lucide="trash-2"></i>
+                                </button>
+                            </div>
+                            
+                            <div class="detail-body-scroll">
+                                <!-- Raw Error Logs Card -->
+                                <div class="detail-section-card">
+                                    <div class="section-card-title">
+                                        <i data-lucide="terminal"></i>
+                                        <h3>Detalle del Error de Loki</h3>
+                                    </div>
+                                    <div class="section-card-content">
+                                        <div id="detail-logs-container" class="logs-wrapper">
+                                            <!-- Dynamic raw logs go here -->
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Matched Rules Indicator -->
+                                <div id="detail-kb-rules-card" class="detail-section-card hide">
+                                    <div class="section-card-title">
+                                        <i data-lucide="sparkles"></i>
+                                        <h3>Reglas del Mapa de Conocimiento Aplicadas</h3>
+                                    </div>
+                                    <div class="section-card-content">
+                                        <div class="matched-kb-container" id="detail-kb-rules-list">
+                                            <!-- rules -->
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- AI Analysis Card -->
+                                <div class="detail-section-card ai-proposal-card">
+                                    <div class="section-card-title">
+                                        <i data-lucide="brain-circuit"></i>
+                                        <h3>Propuesta de Diagnóstico y Solución de IA</h3>
+                                    </div>
+                                    <div class="section-card-content">
+                                        <div id="detail-ai-proposal" class="markdown-body">
+                                            <!-- AI markdown parsed here -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Knowledge Map View -->
+            <section id="view-knowledge" class="content-view">
+                <div class="view-header">
+                    <div class="header-titles">
+                        <h1>Mapa de Conocimiento RAG</h1>
+                        <p>Define patrones de error recurrentes y sus soluciones recomendadas. El bot los inyectará automáticamente en la IA como prioridad máxima.</p>
+                    </div>
+                    <div class="header-actions">
+                        <button id="btn-add-rule" class="btn btn-primary">
+                            <i data-lucide="plus"></i>
+                            <span>Añadir Regla</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="kb-filters-bar">
+                    <div class="search-box">
+                        <i data-lucide="search"></i>
+                        <input type="text" id="kb-search" placeholder="Filtrar por patrón o descripción...">
+                    </div>
+                </div>
+
+                <div id="kb-loader" class="loader-container hide">
+                    <div class="loader"></div>
+                    <p>Cargando base de conocimiento...</p>
+                </div>
+                
+                <div id="kb-empty" class="empty-state hide">
+                    <i data-lucide="alert-triangle"></i>
+                    <h3>Base de Conocimientos Vacía</h3>
+                    <p>Crea tu primera regla para guiar de forma manual el autodiagnóstico del bot.</p>
+                </div>
+
+                <div id="kb-grid" class="kb-cards-grid">
+                    <!-- Dynamic KB rules go here -->
+                </div>
+            </section>
+
+            <!-- Metrics & Health View -->
+            <section id="view-metrics" class="content-view">
+                <div class="view-header">
+                    <div class="header-titles">
+                        <h1>Métricas y Estado del Servidor</h1>
+                        <p>Estado operacional y telemetría de Prometheus expuesta en tiempo real por el bot.</p>
+                    </div>
+                </div>
+
+                <div class="metrics-cards-grid">
+                    <div class="metric-card">
+                        <div class="metric-icon-wrap primary">
+                            <i data-lucide="refresh-cw"></i>
+                        </div>
+                        <div class="metric-info">
+                            <span class="metric-label">Ciclos de Sondeo</span>
+                            <h2 id="metric-cycles" class="metric-value">0</h2>
+                            <span class="metric-desc">Consultas totales realizadas a Loki</span>
+                        </div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-icon-wrap warning">
+                            <i data-lucide="alert-octagon"></i>
+                        </div>
+                        <div class="metric-info">
+                            <span class="metric-label">Errores Detectados</span>
+                            <h2 id="metric-errors" class="metric-value">0</h2>
+                            <span class="metric-desc">Trazas críticas capturadas</span>
+                        </div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-icon-wrap success">
+                            <i data-lucide="send"></i>
+                        </div>
+                        <div class="metric-info">
+                            <span class="metric-label">Alertas en Telegram</span>
+                            <h2 id="metric-alerts" class="metric-value">0</h2>
+                            <span class="metric-desc">Reportes de IA enviados con éxito</span>
+                        </div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-icon-wrap danger">
+                            <i data-lucide="zap"></i>
+                        </div>
+                        <div class="metric-info">
+                            <span class="metric-label">Comandos Auto-healing</span>
+                            <h2 id="metric-commands" class="metric-value">0</h2>
+                            <span class="metric-desc">Soluciones ejecutadas por operador</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="health-console-panel">
+                    <div class="panel-title">
+                        <i data-lucide="cpu"></i>
+                        <h3>Salud e Información Operativa</h3>
+                    </div>
+                    <div class="health-details">
+                        <div class="health-row">
+                            <span class="label">API del Bot (Healthcheck)</span>
+                            <span class="value success-tag">SALUDABLE (200 OK)</span>
+                        </div>
+                        <div class="health-row">
+                            <span class="label">Dirección del Servidor de Logs</span>
+                            <span class="value" id="health-loki-url">Consultando...</span>
+                        </div>
+                        <div class="health-row">
+                            <span class="label">Proveedor de Inteligencia Artificial</span>
+                            <span class="value" id="health-ai-provider">Consultando...</span>
+                        </div>
+                        <div class="health-row">
+                            <span class="label">Frecuencia de Ciclo (Intervalo)</span>
+                            <span class="value" id="health-poll-interval">Consultando...</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+        </main>
+    </div>
+
+    <!-- Dialog / Modal for Add & Edit KB Rule -->
+    <div id="rule-modal" class="modal-overlay hide">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h2 id="modal-title">Añadir Regla de Conocimiento</h2>
+                <button id="btn-close-modal" class="btn-close">&times;</button>
+            </div>
+            <form id="rule-form">
+                <input type="hidden" id="field-original-pattern">
+                
+                <div class="form-group">
+                    <label for="field-pattern">Patrón Coincidente (Mensaje o Subcadena) *</label>
+                    <input type="text" id="field-pattern" placeholder="Ej: Something went wrong while getting library" required>
+                    <span class="form-help">Si este patrón de texto exacto se encuentra en los logs de error, se aplicará esta regla.</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="field-description">Descripción de la Falla</label>
+                    <input type="text" id="field-description" placeholder="Ej: Error en la sincronización de Jellyfin con Seerr">
+                </div>
+
+                <div class="form-group">
+                    <label for="field-cause">Causa Probable</label>
+                    <textarea id="field-cause" rows="2" placeholder="Ej: La API Key de Jellyfin caducó o es incorrecta."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="field-solution">Solución Recomendada por el Administrador *</label>
+                    <textarea id="field-solution" rows="3" placeholder="Ej: Renueva la API Key en Jellyfin e ingrésala de nuevo en la configuración." required></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="field-commands">Comando(s) de Autocuración (Opcional)</label>
+                    <input type="text" id="field-commands" placeholder="Ej: docker restart jellyfin seerr">
+                    <span class="form-help">Comando para habilitar el botón "Ejecutar Solución ⚡" directamente desde Telegram.</span>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" id="btn-cancel-modal" class="btn btn-secondary">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar Regla</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast-notification" class="toast hide">
+        <span id="toast-message">Mensaje de notificación</span>
+    </div>
+
+    <!-- App Script -->
+    <script src="app.js"></script>
+</body>
+</html>

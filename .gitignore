@@ -20,3 +20,9 @@ ENV/
 
 # --- Logs del Sistema ---
 *.log
+
+# --- Base de Datos Local (SQLite) (Crítico) ---
+*.db
+*.sqlite
+*.sqlite3
+

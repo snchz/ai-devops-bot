@@ -7,7 +7,10 @@ services:
       dockerfile: Dockerfile
     container_name: ai-devops-bot
     restart: unless-stopped
+    ports:
+      - "8000:8000"
     env_file:
       - .env
     volumes:
-      - ./knowledge_base.json:/app/knowledge_base.json:ro
+      - ./knowledge_base.json:/app/knowledge_base.json
+      - ./history.db:/app/history.db

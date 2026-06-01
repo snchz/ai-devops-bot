@@ -95,3 +95,7 @@ class Config:
 
         # Knowledge Base path
         self.kb_path = os.getenv("KNOWLEDGE_BASE_PATH", "knowledge_base.json")
+
+        # Database path
+        self.db_path = os.getenv("DATABASE_PATH", "history.db")
+

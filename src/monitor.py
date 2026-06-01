@@ -8,6 +8,8 @@ from src.loki import LokiClient
 from src.knowledge_base import KnowledgeBase
 from src.gemini import GeminiClient
 from src.telegram import TelegramClient
+from src.database import Database
+from src.web_server import WebServer
 from src.logger import logger, METRICS
 
 class LogMonitor:
@@ -19,8 +21,10 @@ class LogMonitor:
         self.gemini = GeminiClient(config)
         self.telegram = TelegramClient(config)
         self.kb = KnowledgeBase(config.kb_path)
+        self.db = Database(config.db_path)
         self.last_processed_timestamp_ns: Optional[int] = None
         self.sent_alerts = {}  # In-memory mapping of alert_key -> timestamp
+
 
     def _is_ignored_level(self, log: Dict[str, Any]) -> bool:
         """
@@ -209,6 +213,10 @@ class LogMonitor:
             logger.error("No se pudo obtener el análisis de la IA. Se reintentará en el próximo ciclo.")
             return
             
+        # Save incident to database (apps list, logs detail, matched rules, and AI analysis)
+        apps = list(filtered_grouped_logs.keys())
+        self.db.save_incident(apps, filtered_grouped_logs, matched_rules, analysis)
+            
         # 5. Dispatch Telegram report grouped by application
         telegram_sent = await self.telegram.send_alert(filtered_grouped_logs, matched_rules, analysis)
         
@@ -319,7 +327,8 @@ class LogMonitor:
         tasks = [polling_task, telegram_task]
         
         if self.config.healthcheck_port:
-            metrics_task = asyncio.create_task(self.start_metrics_server(self.config.healthcheck_port))
-            tasks.append(metrics_task)
+            web_server = WebServer(self.config.healthcheck_port, self.db, self.config.kb_path)
+            web_task = asyncio.create_task(web_server.start())
+            tasks.append(web_task)
             
         await asyncio.gather(*tasks)
