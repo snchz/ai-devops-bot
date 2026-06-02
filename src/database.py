@@ -76,9 +76,18 @@ class Database:
                         description TEXT,
                         cause TEXT,
                         solution TEXT NOT NULL,
-                        commands TEXT
+                        commands TEXT,
+                        action TEXT DEFAULT 'ALERT'
                     )
                 """)
+                
+                # Check for action column migration in kb_rules
+                cursor.execute("PRAGMA table_info(kb_rules)")
+                columns_kb = [col[1] for col in cursor.fetchall()]
+                if columns_kb and "action" not in columns_kb:
+                    logger.info("⚙️ Migrando tabla kb_rules para incluir columna 'action'...")
+                    cursor.execute("ALTER TABLE kb_rules ADD COLUMN action TEXT DEFAULT 'ALERT'")
+                    conn.commit()
                 
                 # Create settings table
                 cursor.execute("""
@@ -332,8 +341,16 @@ class Database:
                         "count": log_item.get("count", 1)
                     })
                     
-                    # Update fields. Reopen if it was resolved or closed
-                    new_status = "ABIERTA"
+                    # Determine if any rule auto-resolves this incident
+                    has_ignore_rule = any(rule.get("action", "ALERT").upper() == "IGNORE" for rule in matched_rules)
+                    new_status = "RESUELTA" if has_ignore_rule else "ABIERTA"
+                    
+                    kb_applied_json = None
+                    if has_ignore_rule:
+                        # Grab the first rule that caused the ignore to register it
+                        ignore_rule = next((r for r in matched_rules if r.get("action", "ALERT").upper() == "IGNORE"), None)
+                        if ignore_rule:
+                            kb_applied_json = json.dumps(ignore_rule, ensure_ascii=False)
                     
                     cursor.execute("""
                         UPDATE incidents
@@ -341,6 +358,7 @@ class Database:
                             logs = ?,
                             matched_rules = ?,
                             ai_proposal = ?,
+                            kb_applied = COALESCE(?, kb_applied),
                             updated_at = ?,
                             history = ?
                         WHERE id = ?
@@ -349,6 +367,7 @@ class Database:
                         json.dumps({app: [log_item]}, ensure_ascii=False),
                         json.dumps(matched_rules, ensure_ascii=False),
                         ai_proposal,
+                        kb_applied_json,
                         current_time,
                         json.dumps(history_list, ensure_ascii=False),
                         incident_id
@@ -366,24 +385,38 @@ class Database:
                     total_count = cursor.fetchone()[0]
                     incident_num = f"INC-{total_count + 1:04d}"
                     
+                    has_ignore_rule = any(rule.get("action", "ALERT").upper() == "IGNORE" for rule in matched_rules)
+                    initial_status = "RESUELTA" if has_ignore_rule else "ABIERTA"
+                    
+                    kb_applied_json = None
+                    if has_ignore_rule:
+                        ignore_rule = next((r for r in matched_rules if r.get("action", "ALERT").upper() == "IGNORE"), None)
+                        if ignore_rule:
+                            kb_applied_json = json.dumps(ignore_rule, ensure_ascii=False)
+                    
                     cursor.execute("""
                         INSERT INTO incidents (
-                            incident_num, status, apps, error_signature, logs, matched_rules, ai_proposal, created_at, updated_at, history
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            incident_num, status, apps, error_signature, logs, matched_rules, ai_proposal, kb_applied, created_at, updated_at, history
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         incident_num,
-                        "ABIERTA",
+                        initial_status,
                         app,
                         error_signature,
                         json.dumps({app: [log_item]}, ensure_ascii=False),
                         json.dumps(matched_rules, ensure_ascii=False),
                         ai_proposal,
+                        kb_applied_json,
                         current_time,
                         current_time,
                         "[]"
                     ))
                     conn.commit()
-                    logger.info(f"🚨 [NUEVO INCIDENTE] Registrado {incident_num} para {app}.")
+                    
+                    if has_ignore_rule:
+                        logger.info(f"🔇 [AUTO-RESUELTO] Incidente {incident_num} para {app} auto-resuelto por regla de conocimiento.")
+                    else:
+                        logger.info(f"🚨 [NUEVO INCIDENTE] Registrado {incident_num} para {app}.")
                     return incident_num
         except Exception as e:
             logger.error(f"❌ Error al registrar/actualizar incidente en la base de datos: {e}", exc_info=True)
@@ -529,7 +562,8 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
-                cursor.execute("SELECT id, pattern, description, cause, solution, commands FROM kb_rules ORDER BY id DESC")
+                # Use PRAGMA to check if action column exists safely, but we added migration in init_db
+                cursor.execute("SELECT id, pattern, description, cause, solution, commands, action FROM kb_rules ORDER BY id DESC")
                 rows = cursor.fetchall()
                 
                 rules = []
@@ -540,14 +574,15 @@ class Database:
                         "description": row["description"] or "",
                         "cause": row["cause"] or "",
                         "solution": row["solution"],
-                        "commands": row["commands"] or ""
+                        "commands": row["commands"] or "",
+                        "action": row["action"] if "action" in row.keys() else "ALERT"
                     })
                 return rules
         except Exception as e:
             logger.error(f"❌ Error al obtener reglas de conocimiento desde SQLite: {e}", exc_info=True)
             return []
 
-    def save_kb_rule(self, pattern: str, description: str, cause: str, solution: str, commands: str, original_pattern: Optional[str] = None) -> bool:
+    def save_kb_rule(self, pattern: str, description: str, cause: str, solution: str, commands: str, action: str = "ALERT", original_pattern: Optional[str] = None) -> bool:
         """Saves (inserts or updates) a Knowledge Base rule in SQLite."""
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -568,15 +603,16 @@ class Database:
                             description = ?,
                             cause = ?,
                             solution = ?,
-                            commands = ?
+                            commands = ?,
+                            action = ?
                         WHERE id = ?
-                    """, (pattern, description, cause, solution, commands, rule_id))
+                    """, (pattern, description, cause, solution, commands, action, rule_id))
                 else:
                     # Insert
                     cursor.execute("""
-                        INSERT INTO kb_rules (pattern, description, cause, solution, commands)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (pattern, description, cause, solution, commands))
+                        INSERT INTO kb_rules (pattern, description, cause, solution, commands, action)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (pattern, description, cause, solution, commands, action))
                 conn.commit()
             return True
         except Exception as e:

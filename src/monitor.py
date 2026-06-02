@@ -217,35 +217,71 @@ class LogMonitor:
             logger.info(f"Silenciadas {skipped_count} repeticiones de error en este ciclo por políticas de fatiga de alertas.")
             
         # Compile a flat list of unique items for Knowledge Base matching
-        flat_unique_logs = []
-        for items in filtered_grouped_logs.values():
-            flat_unique_logs.extend(items)
-            
-        # 3. Match unique logs with local RAG Knowledge Base rules
-        matched_rules = self.kb.match_logs(flat_unique_logs)
+        # 3. Match unique logs with local RAG Knowledge Base rules per item
+        logs_for_ai = {}
+        ignored_logs_to_save = []
+        matched_rules_for_ai = []
         
-        # 4. Analyze logs in batch, injecting custom solutions if rules were matched
-        try:
-            analysis = await self.gemini.analyze_logs(filtered_grouped_logs, matched_rules)
-        except Exception as ai_err:
-            logger.error(f"Excepción al invocar el proveedor de IA: {ai_err}")
-            analysis = None
+        rules = self.kb.load_rules()
         
-        if not analysis:
-            logger.warning("No se pudo obtener el análisis de la IA. Registrando incidente con propuesta de fallback.")
-            analysis = (
-                "⚠️ **[ERROR DE PROVEEDOR DE IA]**\n\n"
-                "El bot no pudo obtener un diagnóstico automatizado del proveedor de Inteligencia Artificial seleccionado "
-                "(verifica tu `AI_PROVIDER` y `API_KEY` en la configuración del archivo `.env`).\n\n"
-                "Puedes consultar el detalle del error en los logs originales del contenedor mostrados arriba."
-            )
-        else:
-            METRICS["alerts_sent"] += 1
-            
-        # Save incident to database (register or update recurrence of each unique error in the database)
         for app, items in filtered_grouped_logs.items():
             for item in items:
-                await asyncio.to_thread(self.db.register_or_recur_incident, app, item, matched_rules, analysis)
+                msg_lower = item["message"].lower()
+                item_matched_rules = []
+                is_ignored = False
+                
+                for rule in rules:
+                    pattern = rule.get("pattern", "").lower()
+                    if pattern and pattern in msg_lower:
+                        item_matched_rules.append(rule)
+                        if rule.get("action", "ALERT").upper() == "IGNORE":
+                            is_ignored = True
+                            
+                if is_ignored:
+                    ignored_logs_to_save.append((app, item, item_matched_rules))
+                else:
+                    if app not in logs_for_ai:
+                        logs_for_ai[app] = []
+                    logs_for_ai[app].append(item)
+                    for r in item_matched_rules:
+                        if r not in matched_rules_for_ai:
+                            matched_rules_for_ai.append(r)
+                            
+        # Log if we are skipping some
+        if ignored_logs_to_save:
+            logger.info(f"🔇 Omitiendo análisis de IA para {len(ignored_logs_to_save)} logs silenciados por Reglas de Conocimiento (Acción: IGNORE).")
+        
+        # 4. Analyze logs in batch, injecting custom solutions if rules were matched
+        analysis = None
+        if logs_for_ai:
+            try:
+                analysis = await self.gemini.analyze_logs(logs_for_ai, matched_rules_for_ai)
+            except Exception as ai_err:
+                logger.error(f"Excepción al invocar el proveedor de IA: {ai_err}")
+                analysis = None
+            
+            if not analysis:
+                logger.warning("No se pudo obtener el análisis de la IA. Registrando incidente con propuesta de fallback.")
+                analysis = (
+                    "⚠️ **[ERROR DE PROVEEDOR DE IA]**\n\n"
+                    "El bot no pudo obtener un diagnóstico automatizado del proveedor de Inteligencia Artificial seleccionado "
+                    "(verifica tu `AI_PROVIDER` y `API_KEY` en la configuración del archivo `.env`).\n\n"
+                    "Puedes consultar el detalle del error en los logs originales del contenedor mostrados arriba."
+                )
+            else:
+                METRICS["alerts_sent"] += 1
+            
+        # Save incident to database
+        # 5a. Save AI processed logs
+        for app, items in logs_for_ai.items():
+            for item in items:
+                # We pass matched_rules_for_ai (or recalculate per item, but the current db takes the list)
+                await asyncio.to_thread(self.db.register_or_recur_incident, app, item, matched_rules_for_ai, analysis)
+                
+        # 5b. Save ignored logs
+        for app, item, item_rules in ignored_logs_to_save:
+            ignore_analysis = "🔇 **[AUTO-RESUELTO]**\n\nEl sistema ha silenciado y auto-resuelto esta incidencia automáticamente porque coincide con una Regla de Conocimiento (Acción: Ignorar)."
+            await asyncio.to_thread(self.db.register_or_recur_incident, app, item, item_rules, ignore_analysis)
             
         # Update last processed timestamp to the latest log seen
         max_ts = max(log["timestamp_ns"] for log in new_logs)

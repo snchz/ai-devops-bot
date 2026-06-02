@@ -274,6 +274,7 @@ class WebServer:
                 cause = payload.get("cause", "").strip()
                 solution = payload.get("solution", "").strip()
                 commands = payload.get("commands", "").strip()
+                action = payload.get("action", "ALERT").strip().upper()
                 original_pattern = payload.get("original_pattern", "").strip()
                 
                 if not pattern or not solution:
@@ -282,7 +283,7 @@ class WebServer:
                     await writer.drain()
                     return
                     
-                success = await asyncio.to_thread(self.db.save_kb_rule, pattern, description, cause, solution, commands, original_pattern)
+                success = await asyncio.to_thread(self.db.save_kb_rule, pattern, description, cause, solution, commands, action, original_pattern)
                 if success:
                     resp_body = b'{"success": true}'
                     writer.write(self._make_response(200, "OK", "application/json", resp_body))

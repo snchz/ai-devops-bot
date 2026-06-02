@@ -85,6 +85,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const fieldCause = document.getElementById("field-cause");
     const fieldSolution = document.getElementById("field-solution");
     const fieldCommands = document.getElementById("field-commands");
+    const fieldAction = document.getElementById("field-action");
 
     // Resolve Incident Modal Elements
     const resolveModal = document.getElementById("resolve-modal");
@@ -679,10 +680,12 @@ document.addEventListener("DOMContentLoaded", () => {
             fieldCause.value = rule.cause || "";
             fieldSolution.value = rule.solution || "";
             fieldCommands.value = rule.commands || "";
+            fieldAction.value = rule.action || "ALERT";
         } else {
             // New Mode
             modalTitle.textContent = "Añadir Regla de Conocimiento";
             fieldOriginalPattern.value = "";
+            fieldAction.value = "ALERT";
         }
         
         ruleModal.classList.remove("hide");
@@ -704,7 +707,8 @@ document.addEventListener("DOMContentLoaded", () => {
             description: fieldDescription.value.trim(),
             cause: fieldCause.value.trim(),
             solution: fieldSolution.value.trim(),
-            commands: fieldCommands.value.trim()
+            commands: fieldCommands.value.trim(),
+            action: fieldAction.value
         };
 
         try {

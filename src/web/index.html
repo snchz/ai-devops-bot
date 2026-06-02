@@ -405,6 +405,15 @@
                 </div>
 
                 <div class="form-group">
+                    <label for="field-action">Comportamiento de la Regla (Acción) *</label>
+                    <select id="field-action" required style="width: 100%; background-color: rgba(8, 12, 20, 0.5); border: 1px solid var(--border-crystal); color: var(--text-primary); padding: 10px 14px; border-radius: var(--border-radius-md); font-size: 14px; outline: none; margin-bottom: 5px;">
+                        <option value="ALERT">Alertar e Instruir al Operario (Abre Incidencia)</option>
+                        <option value="IGNORE">Ignorar y Silenciar (Auto-Resuelve la Incidencia)</option>
+                    </select>
+                    <span class="form-help">Determina si el error se debe mostrar como alerta o si se debe ignorar/auto-cerrar en silencio.</span>
+                </div>
+
+                <div class="form-group">
                     <label for="field-solution">Solución Recomendada por el Administrador *</label>
                     <textarea id="field-solution" rows="3" placeholder="Ej: Renueva la API Key en Jellyfin e ingrésala de nuevo en la configuración." required></textarea>
                 </div>
