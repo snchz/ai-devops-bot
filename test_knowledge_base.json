@@ -1,9 +1,0 @@
-[
-  {
-    "pattern": "test_error_pattern",
-    "description": "Test description",
-    "cause": "Test cause",
-    "solution": "Test solution",
-    "commands": "echo 'verified'"
-  }
-]

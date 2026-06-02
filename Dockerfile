@@ -36,7 +36,7 @@ RUN groupadd -g 10001 appgroup && \
 COPY --from=builder /opt/venv /opt/venv
 
 # Copiar el código del bot, base de conocimientos y ajustar permisos
-COPY bot.py knowledge_base.json ./
+COPY bot.py ./
 COPY src/ ./src/
 
 # Crear carpeta de datos dedicada para SQLite y volumen persistente

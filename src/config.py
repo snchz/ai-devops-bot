@@ -74,9 +74,6 @@ class Config:
             logger.warning("HEALTHCHECK_PORT no es un número válido. Usando valor por defecto: 8000")
             self.healthcheck_port = 8000
 
-        # Knowledge Base path
-        self.kb_path = os.getenv("KNOWLEDGE_BASE_PATH", "knowledge_base.json")
-
         # Database path
         self.db_path = os.getenv("DATABASE_PATH", "data/history.db")
         db_dir = os.path.dirname(self.db_path)

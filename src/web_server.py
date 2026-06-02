@@ -9,10 +9,9 @@ from src.database import Database
 class WebServer:
     """Lightweight, fully asynchronous, dependency-free HTTP server for metrics, healthcheck, and Web UI REST APIs."""
     
-    def __init__(self, port: int, db: Database, kb_path: str):
+    def __init__(self, port: int, db: Database):
         self.port = port
         self.db = db
-        self.kb_path = kb_path
         
         # Absolute path to the web folder
         base_dir = os.path.dirname(os.path.abspath(__file__))

@@ -19,7 +19,6 @@ class LogMonitor:
         self.loki = LokiClient(config)
         self.gemini = GeminiClient(config)
         self.db = Database(config.db_path)
-        self.db.import_legacy_json_rules(config.kb_path)  # Import RAG rules from JSON to SQLite on startup
         self.kb = KnowledgeBase(self.db)
         self.last_processed_timestamp_ns: Optional[int] = None
         self.sent_alerts = {}  # In-memory mapping of alert_key -> timestamp
@@ -262,7 +261,7 @@ class LogMonitor:
         tasks = [polling_task]
         
         if self.config.healthcheck_port:
-            web_server = WebServer(self.config.healthcheck_port, self.db, self.config.kb_path)
+            web_server = WebServer(self.config.healthcheck_port, self.db)
             web_task = asyncio.create_task(web_server.start())
             tasks.append(web_task)
             

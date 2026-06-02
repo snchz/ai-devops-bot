@@ -172,7 +172,6 @@ LOG_LEVEL=INFO
         env_file:
           - .env
         volumes:
-          - ./knowledge_base.json:/app/knowledge_base.json:ro
     ```
 3.  **Start Stack in Dockge**:
     *   Open your **Dockge** web UI. Refresh, select `ai-devops-bot` under **Inactive** sidebar.
@@ -213,7 +212,6 @@ services:
     env_file:
       - .env
     volumes:
-      - /home/leif/docker/configs/ai-devops-bot/knowledge_base.json:/app/knowledge_base.json
       - /home/leif/docker/configs/ai-devops-bot/history.db:/app/history.db
 ```
 Click **Save**, then **Active**.
@@ -224,14 +222,11 @@ Click **Save**, then **Active**.
 >    * To fix/prevent this, execute these commands on your host server before starting the container:
 >      ```bash
 >      rm -rf /home/leif/docker/configs/ai-devops-bot/history.db
->      rm -rf /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
 >      touch /home/leif/docker/configs/ai-devops-bot/history.db
->      echo '[]' > /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
 >      ```
 > 2. **Resolve SQLite "Unable to Open Database File" Error**: Since the container runs under a non-root `appuser` (UID `10001`), it must have read-write access to these host files. Grant correct permissions by running:
 >    ```bash
 >    chmod 666 /home/leif/docker/configs/ai-devops-bot/history.db
->    chmod 666 /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
 >    ```
 
 #### Step 4: Let Watchtower do the magic
@@ -412,7 +407,6 @@ Si deseas compilar la imagen localmente en el servidor:
         env_file:
           - .env
         volumes:
-          - ./knowledge_base.json:/app/knowledge_base.json:ro
     ```
 3.  **Iniciar en Dockge**:
     *   Abre la web de **Dockge** y verás el stack `ai-devops-bot` inactivo.
@@ -453,7 +447,6 @@ services:
     env_file:
       - .env
     volumes:
-      - /home/leif/docker/configs/ai-devops-bot/knowledge_base.json:/app/knowledge_base.json
       - /home/leif/docker/configs/ai-devops-bot/history.db:/app/history.db
 ```
 Haz clic en **Save** y luego en **Active**. 
@@ -464,14 +457,11 @@ Haz clic en **Save** y luego en **Active**.
 >    * Resuélvelo ejecutando esto en la consola de tu servidor antes de iniciar el contenedor:
 >      ```bash
 >      rm -rf /home/leif/docker/configs/ai-devops-bot/history.db
->      rm -rf /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
 >      touch /home/leif/docker/configs/ai-devops-bot/history.db
->      echo '[]' > /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
 >      ```
 > 2. **Resolver el error SQLite "Unable to open database file"**: Debido a que el bot corre de forma segura bajo el usuario no root `appuser` (UID `10001`) dentro del contenedor, necesita permisos completos sobre estos archivos montados. Configura los permisos correctos ejecutando:
 >    ```bash
 >    chmod 666 /home/leif/docker/configs/ai-devops-bot/history.db
->    chmod 666 /home/leif/docker/configs/ai-devops-bot/knowledge_base.json
 >    ```
 
 #### Paso 4: Dejar que Watchtower trabaje

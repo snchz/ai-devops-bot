@@ -12,9 +12,6 @@ services:
     env_file:
       - .env
     volumes:
-      - bot-data:/app/data
+      - ./data:/app/data
     environment:
       - DATABASE_PATH=/app/data/history.db
-
-volumes:
-  bot-data:

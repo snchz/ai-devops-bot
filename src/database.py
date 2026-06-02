@@ -248,44 +248,6 @@ class Database:
             logger.error(f"❌ Error durante la migración y consolidación de firmas: {e}", exc_info=True)
 
 
-    def import_legacy_json_rules(self, json_path: str):
-        """Imports rules from legacy JSON file into SQLite if the database is empty."""
-        if not os.path.exists(json_path):
-            return
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                # Check if kb_rules is empty
-                cursor.execute("SELECT COUNT(*) FROM kb_rules")
-                count = cursor.fetchone()[0]
-                if count > 0:
-                    return # Already populated
-                    
-                # Read legacy JSON
-                with open(json_path, "r", encoding="utf-8") as f:
-                    rules = json.load(f)
-                    
-                if not rules:
-                    return
-                    
-                logger.info(f"📦 Migrando {len(rules)} reglas heredadas desde {json_path} a SQLite...")
-                for rule in rules:
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO kb_rules (pattern, description, cause, solution, commands)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (
-                        rule.get("pattern", ""),
-                        rule.get("description", ""),
-                        rule.get("cause", ""),
-                        rule.get("solution", ""),
-                        rule.get("commands", "")
-                    ))
-                conn.commit()
-            logger.info(f"🎉 Migración exitosa de reglas heredadas a la base de datos SQLite.")
-        except Exception as e:
-            logger.error(f"❌ Error al migrar reglas desde el archivo JSON heredado: {e}", exc_info=True)
-
     def _get_error_fingerprint(self, message: str) -> str:
         """Generates a normalized fingerprint for the error message, stripping dynamic variables (dates, timestamps, numbers, UUIDs, hex/hashes)."""
         sig = message.lower().strip()
