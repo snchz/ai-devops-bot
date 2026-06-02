@@ -420,6 +420,39 @@ class Database:
             logger.error(f"❌ Error al obtener incidentes de la base de datos: {e}", exc_info=True)
             return []
 
+    def get_incident(self, incident_id: int) -> Optional[Dict[str, Any]]:
+        """Retrieves a specific incident by its ID."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, incident_num, status, apps, error_signature, logs, matched_rules, ai_proposal, kb_applied, created_at, updated_at, history
+                    FROM incidents
+                    WHERE id = ?
+                """, (incident_id,))
+                row = cursor.fetchone()
+                
+                if row:
+                    return {
+                        "id": row["id"],
+                        "incident_num": row["incident_num"],
+                        "status": row["status"],
+                        "apps": row["apps"].split(",") if row["apps"] else [],
+                        "error_signature": row["error_signature"],
+                        "logs": json.loads(row["logs"]),
+                        "matched_rules": json.loads(row["matched_rules"]),
+                        "ai_proposal": row["ai_proposal"],
+                        "kb_applied": json.loads(row["kb_applied"]) if row["kb_applied"] else None,
+                        "created_at": row["created_at"],
+                        "updated_at": row["updated_at"],
+                        "history": json.loads(row["history"]) if row["history"] else []
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"❌ Error al obtener incidente {incident_id} de la base de datos: {e}", exc_info=True)
+            return None
+
     def resolve_incident(self, incident_id: int, kb_rule: Dict[str, Any]) -> bool:
         """Resolves an incident by linking it to an applied Knowledge Base rule."""
         try:

@@ -5,13 +5,17 @@ import asyncio
 from typing import Dict, Any, List, Optional
 from src.logger import logger, METRICS
 from src.database import Database
+from src.config import Config
+from src.loki import LokiClient
 
 class WebServer:
     """Lightweight, fully asynchronous, dependency-free HTTP server for metrics, healthcheck, and Web UI REST APIs."""
     
-    def __init__(self, port: int, db: Database):
-        self.port = port
+    def __init__(self, config: Config, db: Database):
+        self.config = config
+        self.port = config.healthcheck_port
         self.db = db
+        self.loki = LokiClient(config)
         
         # Absolute path to the web folder
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -150,6 +154,31 @@ class WebServer:
             incidents = await asyncio.to_thread(self.db.get_incidents, limit)
             resp_body = json.dumps(incidents, ensure_ascii=False).encode("utf-8")
             writer.write(self._make_response(200, "OK", "application/json", resp_body))
+            await writer.drain()
+            return
+            
+        elif path.startswith("/api/incidents/") and path.endswith("/context") and method == "GET":
+            try:
+                incident_id = int(path.split("/")[-2])
+                incident = await asyncio.to_thread(self.db.get_incident, incident_id)
+                
+                if not incident:
+                    resp_body = b'{"error": "Incident not found"}'
+                    writer.write(self._make_response(404, "Not Found", "application/json", resp_body))
+                else:
+                    app_name = incident["apps"][0] if incident["apps"] else ""
+                    # We use the created_at timestamp for context, converting to nanoseconds
+                    target_ts_ns = int(incident["created_at"]) * 1_000_000_000
+                    
+                    logs = await self.loki.fetch_context_logs(app_name, target_ts_ns, window_minutes=5)
+                    resp_body = json.dumps(logs, ensure_ascii=False).encode("utf-8")
+                    writer.write(self._make_response(200, "OK", "application/json", resp_body))
+            except ValueError:
+                resp_body = b'{"error": "Invalid incident ID"}'
+                writer.write(self._make_response(400, "Bad Request", "application/json", resp_body))
+            except Exception as ex:
+                resp_body = f'{{"error": "{str(ex)}"}}'.encode("utf-8")
+                writer.write(self._make_response(500, "Internal Server Error", "application/json", resp_body))
             await writer.drain()
             return
             

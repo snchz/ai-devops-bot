@@ -40,6 +40,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnResolveIncident = document.getElementById("btn-resolve-incident");
     const btnDeleteIncident = document.getElementById("btn-delete-incident");
     const detailLogsContainer = document.getElementById("detail-logs-container");
+    const btnFetchContext = document.getElementById("btn-fetch-context");
+    const contextLogsLoader = document.getElementById("context-logs-loader");
+    const contextLogsContainer = document.getElementById("context-logs-container");
     const detailKbrulesCard = document.getElementById("detail-kb-rules-card");
     const detailKbrulesList = document.getElementById("detail-kb-rules-list");
     const detailHistoryCard = document.getElementById("detail-history-card");
@@ -306,6 +309,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Render Raw Logs
         detailLogsContainer.innerHTML = "";
+        contextLogsContainer.innerHTML = "";
+        contextLogsContainer.classList.add("hide");
+        contextLogsLoader.classList.add("hide");
+        btnFetchContext.classList.remove("hide");
         for (const [app, logsList] of Object.entries(inc.logs)) {
             const appBlock = document.createElement("div");
             appBlock.className = "log-app-block";
@@ -419,6 +426,49 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (err) {
             console.error(err);
             showToast("Error al intentar eliminar el incidente.", "error");
+        }
+    });
+
+    // --- FETCH CONTEXT LOGS LOGIC ---
+    btnFetchContext.addEventListener("click", async () => {
+        if (!currentIncidentId) return;
+        
+        btnFetchContext.classList.add("hide");
+        contextLogsLoader.classList.remove("hide");
+        contextLogsContainer.classList.add("hide");
+        contextLogsContainer.innerHTML = "";
+        
+        try {
+            const res = await fetch(`${API_BASE}/api/incidents/${currentIncidentId}/context`);
+            if (!res.ok) throw new Error("Fallo al obtener contexto de logs");
+            
+            const logs = await res.json();
+            
+            if (logs.length === 0) {
+                contextLogsContainer.innerHTML = `<div style="text-align:center; padding:15px; color:var(--text-muted);">No se encontraron logs en la ventana de tiempo.</div>`;
+            } else {
+                const logsHtml = logs.map(log => {
+                    // Try to highlight the actual error based on the original log
+                    const isError = log.message.toLowerCase().includes("error") || log.message.toLowerCase().includes("exception");
+                    const style = isError ? "color: #ef4444;" : "";
+                    return `<div class="log-item-line" style="${style}"><code><span style="color:#6b7280; font-size:10px; margin-right:8px;">${log.datetime}</span>${log.message}</code></div>`;
+                }).join("");
+                
+                contextLogsContainer.innerHTML = `
+                    <div class="log-app-name" style="margin-bottom:8px;"><i data-lucide="align-justify" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:4px;"></i> Contexto Completo (±5 mins)</div>
+                    <div class="log-items-list" style="max-height: 400px; overflow-y: auto;">${logsHtml}</div>
+                `;
+            }
+            
+            contextLogsContainer.classList.remove("hide");
+            lucide.createIcons();
+            
+        } catch (err) {
+            console.error(err);
+            showToast("Error al cargar el contexto desde Loki.", "error");
+            btnFetchContext.classList.remove("hide");
+        } finally {
+            contextLogsLoader.classList.add("hide");
         }
     });
 

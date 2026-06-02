@@ -157,13 +157,24 @@
 
                                 <!-- Raw Error Logs Card -->
                                 <div class="detail-section-card">
-                                    <div class="section-card-title">
-                                        <i data-lucide="terminal"></i>
-                                        <h3>Detalle del Error de Loki</h3>
+                                    <div class="section-card-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <i data-lucide="terminal"></i>
+                                            <h3>Detalle del Error de Loki</h3>
+                                        </div>
+                                        <button id="btn-fetch-context" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;">
+                                            <i data-lucide="list"></i> Ver Contexto Completo
+                                        </button>
                                     </div>
                                     <div class="section-card-content">
                                         <div id="detail-logs-container" class="logs-wrapper">
                                             <!-- Dynamic raw logs go here -->
+                                        </div>
+                                        <div id="context-logs-loader" class="hide" style="text-align: center; padding: 10px; color: var(--text-muted); font-size: 12px;">
+                                            <i data-lucide="loader-2" class="spin"></i> Cargando contexto de logs...
+                                        </div>
+                                        <div id="context-logs-container" class="logs-wrapper hide" style="margin-top: 10px; border-top: 1px dashed var(--border-crystal); padding-top: 10px;">
+                                            <!-- Context logs go here -->
                                         </div>
                                     </div>
                                 </div>

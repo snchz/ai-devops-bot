@@ -272,7 +272,7 @@ class LogMonitor:
         tasks = [polling_task]
         
         if self.config.healthcheck_port:
-            web_server = WebServer(self.config.healthcheck_port, self.db)
+            web_server = WebServer(self.config, self.db)
             web_task = asyncio.create_task(web_server.start())
             tasks.append(web_task)
             
