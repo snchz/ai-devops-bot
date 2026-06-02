@@ -284,9 +284,13 @@ class Database:
         # 4. Replace standalone numbers/integers/floats (to group connection ports, IDs, counts)
         sig = re.sub(r'\b\d+(?:\.\d+)?\b', '<num>', sig)
         
-        # 5. Normalize whitespace and take first 150 chars
-        sig = re.sub(r'\s+', ' ', sig)
-        return sig[:150].strip()
+        # 5. Normalize whitespace
+        sig = re.sub(r'\s+', ' ', sig).strip()
+        
+        # Take first and last 75 chars for long strings to capture both context and actual error
+        if len(sig) > 150:
+            return sig[:75] + "..." + sig[-75:]
+        return sig
 
     def register_or_recur_incident(self, app: str, log_item: Dict[str, Any], matched_rules: List[Dict[str, Any]], ai_proposal: str) -> str:
         """Registers a new incident or processes a recurrence/reopening of an existing one."""

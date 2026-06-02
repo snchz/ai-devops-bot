@@ -92,8 +92,9 @@ class LogMonitor:
 
     def group_and_deduplicate(self, logs: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Groups retrieved raw log items by container or job name and collapses
-        identical message strings to count duplications.
+        Groups retrieved raw log items by container or job name.
+        Combines logs that occur within 2 seconds of each other into a single block
+        (useful for tracebacks), and counts exact duplications.
         """
         grouped = {}
         for log in logs:
@@ -104,23 +105,39 @@ class LogMonitor:
                 grouped[app] = []
                 
             msg = log["message"]
+            log_time = log.get("timestamp_ns", 0)
             
             # Check for exact duplicate in current list
-            found = False
+            found_exact = False
             for item in grouped[app]:
                 if item["message"] == msg:
                     item["count"] += 1
                     item["datetime"] = log["datetime"]  # Update to latest datetime seen
-                    found = True
+                    item["timestamp_ns"] = max(item.get("timestamp_ns", 0), log_time)
+                    found_exact = True
                     break
                     
-            if not found:
-                grouped[app].append({
-                    "message": msg,
-                    "datetime": log["datetime"],
-                    "count": 1,
-                    "labels": log["labels"]
-                })
+            if not found_exact:
+                # Check for time proximity (within 2 seconds) to group into an existing block
+                added_to_block = False
+                for item in grouped[app]:
+                    if abs(item.get("timestamp_ns", 0) - log_time) <= 2_000_000_000:
+                        # Append the new message line to the existing block
+                        item["message"] += "\n" + msg
+                        # Update the block's time to the latest log's time
+                        item["datetime"] = log["datetime"]
+                        item["timestamp_ns"] = max(item.get("timestamp_ns", 0), log_time)
+                        added_to_block = True
+                        break
+                        
+                if not added_to_block:
+                    grouped[app].append({
+                        "message": msg,
+                        "datetime": log["datetime"],
+                        "timestamp_ns": log_time,
+                        "count": 1,
+                        "labels": log["labels"]
+                    })
         return grouped
 
     async def run_poll_cycle(self):
