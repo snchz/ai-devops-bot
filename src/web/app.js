@@ -344,7 +344,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 timelineHtml += `
                     <div class="timeline-item reopen">
                         <div class="timeline-time">${formatTimestamp(h.timestamp)}</div>
-                        <div class="timeline-title">Recurrencia #${index + 1} - Incidente Reabierto</div>
+                        <div class="timeline-title">Recurrencia del Error #${index + 1}</div>
                         <div class="timeline-desc">${h.message} <span class="log-item-count">(Ocurrencias en ciclo: x${h.count})</span></div>
                     </div>
                 `;

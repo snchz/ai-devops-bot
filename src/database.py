@@ -247,7 +247,16 @@ class Database:
         
         # 1. Strip standard ISO/Timestamp dates and times
         # Matches: YYYY-MM-DD HH:MM:SS, HH:MM:SS.mmm, etc.
-        sig = re.sub(r'\d{4}[-/]\d{2}[-/]\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?', '<date>', sig)
+        sig = re.sub(r'\d{4}[-/]\d{2}[-/]\d{2}[ tT]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:[zZ]|[+-]\d{2}:?\d{2})?', '<date-time>', sig)
+        
+        # Matches Apache / Common Log style: [02/Jun/2026:10:11:24 +0200]
+        sig = re.sub(r'\b\d{2}/[a-z]{3}/\d{4}:\d{2}:\d{2}:\d{2}(?:\s+[+-]\d{4})?\b', '<date-time>', sig)
+        
+        # Matches other custom date styles: DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD
+        sig = re.sub(r'\b\d{2}[-/]\d{2}[-/]\d{4}\b', '<date>', sig)
+        sig = re.sub(r'\b\d{4}[-/]\d{2}[-/]\d{2}\b', '<date>', sig)
+        
+        # Matches standalone times: HH:MM:SS
         sig = re.sub(r'\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b', '<time>', sig)
         
         # 2. Strip UUIDs (matches 8-4-4-4-12 hex format)
