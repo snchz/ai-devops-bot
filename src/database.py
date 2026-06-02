@@ -2,6 +2,7 @@ import sqlite3
 import json
 import time
 import os
+import re
 from typing import List, Dict, Any, Optional
 from src.logger import logger
 
@@ -58,9 +59,149 @@ class Database:
                     )
                 """)
                 conn.commit()
+            
+            # Auto-migrate and consolidate old duplicate incidents on startup
+            self._migrate_and_consolidate_signatures()
+            
             logger.info(f"💾 Base de datos SQLite consolidada inicializada exitosamente en: {self.db_path}")
         except Exception as e:
             logger.error(f"❌ Error al inicializar la base de datos SQLite en '{self.db_path}': {e}", exc_info=True)
+
+    def _migrate_and_consolidate_signatures(self):
+        """
+        Migrates existing database records to the new normalized signature format,
+        consolidating/merging duplicates automatically.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                # Fetch all existing incidents
+                cursor.execute("SELECT * FROM incidents")
+                rows = cursor.fetchall()
+                if not rows:
+                    return
+                
+                logger.info(f"⚙️ Iniciando migración y consolidación de {len(rows)} incidencias históricas...")
+                
+                # Group by normalized signature: f"{app}:{fingerprint}"
+                groups = {}
+                for row in rows:
+                    app = row["apps"]
+                    # Parse logs to extract the original message to run through fingerprinting
+                    try:
+                        logs_dict = json.loads(row["logs"])
+                        first_msg = ""
+                        for app_name, items in logs_dict.items():
+                            if items:
+                                first_msg = items[0].get("message", "")
+                                break
+                    except Exception:
+                        first_msg = ""
+                        
+                    if not first_msg:
+                        # Fallback to the signature prefix if parsing fails
+                        first_msg = row["error_signature"].split(":", 1)[-1]
+                        
+                    fingerprint = self._get_error_fingerprint(first_msg)
+                    first_app = app.split(",")[0] if "," in app else app
+                    norm_sig = f"{first_app}:{fingerprint}"
+                    
+                    if norm_sig not in groups:
+                        groups[norm_sig] = []
+                    groups[norm_sig].append(row)
+                
+                # Consolidate groups
+                consolidated_count = 0
+                for norm_sig, group in groups.items():
+                    if len(group) == 1:
+                        # Only one incident, just update its signature to the normalized one
+                        row = group[0]
+                        cursor.execute("""
+                            UPDATE incidents
+                            SET error_signature = ?
+                            WHERE id = ?
+                        """, (norm_sig, row["id"]))
+                        continue
+                    
+                    # Duplicate found! We need to merge them.
+                    group.sort(key=lambda r: r["id"]) # Sort by ID (oldest first)
+                    primary = group[0]
+                    duplicates = group[1:]
+                    
+                    primary_history = []
+                    try:
+                        primary_history = json.loads(primary["history"])
+                    except Exception:
+                        pass
+                        
+                    for dup in duplicates:
+                        dup_logs = {}
+                        try:
+                            dup_logs = json.loads(dup["logs"])
+                        except Exception:
+                            pass
+                            
+                        # Add each log item in dup to the history list
+                        for app_name, items in dup_logs.items():
+                            for item in items:
+                                primary_history.append({
+                                    "timestamp": dup["created_at"],
+                                    "datetime": item.get("datetime", ""),
+                                    "message": item.get("message", ""),
+                                    "count": item.get("count", 1)
+                                })
+                                
+                        # Merge the duplicate's own history
+                        try:
+                            dup_hist = json.loads(dup["history"])
+                            if isinstance(dup_hist, list):
+                                primary_history.extend(dup_hist)
+                        except Exception:
+                            pass
+                    
+                    # Sort merged history by timestamp
+                    primary_history.sort(key=lambda h: h.get("timestamp", 0))
+                    
+                    # Determine consolidated status: open if any is open
+                    any_open = primary["status"] == "ABIERTA" or any(d["status"] == "ABIERTA" for d in duplicates)
+                    cons_status = "ABIERTA" if any_open else "RESUELTA"
+                    
+                    cons_created = min(primary["created_at"], min(d["created_at"] for d in duplicates))
+                    cons_updated = max(primary["updated_at"], max(d["updated_at"] for d in duplicates))
+                    
+                    cursor.execute("""
+                        UPDATE incidents
+                        SET error_signature = ?,
+                            status = ?,
+                            created_at = ?,
+                            updated_at = ?,
+                            history = ?
+                        WHERE id = ?
+                    """, (
+                        norm_sig,
+                        cons_status,
+                        cons_created,
+                        cons_updated,
+                        json.dumps(primary_history, ensure_ascii=False),
+                        primary["id"]
+                    ))
+                    
+                    # Delete duplicates
+                    dup_ids = [d["id"] for d in duplicates]
+                    placeholders = ",".join("?" for _ in dup_ids)
+                    cursor.execute(f"DELETE FROM incidents WHERE id IN ({placeholders})", tuple(dup_ids))
+                    consolidated_count += len(duplicates)
+                
+                conn.commit()
+                if consolidated_count > 0:
+                    logger.info(f"✨ Migración de base de datos finalizada: se consolidaron y eliminaron {consolidated_count} incidencias duplicadas.")
+                else:
+                    logger.info("✅ Todos los incidentes históricos ya estaban normalizados y sin duplicados.")
+        except Exception as e:
+            logger.error(f"❌ Error durante la migración y consolidación de firmas: {e}", exc_info=True)
+
 
     def import_legacy_json_rules(self, json_path: str):
         """Imports rules from legacy JSON file into SQLite if the database is empty."""
@@ -100,12 +241,35 @@ class Database:
         except Exception as e:
             logger.error(f"❌ Error al migrar reglas desde el archivo JSON heredado: {e}", exc_info=True)
 
+    def _get_error_fingerprint(self, message: str) -> str:
+        """Generates a normalized fingerprint for the error message, stripping dynamic variables (dates, timestamps, numbers, UUIDs, hex/hashes)."""
+        sig = message.lower().strip()
+        
+        # 1. Strip standard ISO/Timestamp dates and times
+        # Matches: YYYY-MM-DD HH:MM:SS, HH:MM:SS.mmm, etc.
+        sig = re.sub(r'\d{4}[-/]\d{2}[-/]\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?', '<date>', sig)
+        sig = re.sub(r'\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b', '<time>', sig)
+        
+        # 2. Strip UUIDs (matches 8-4-4-4-12 hex format)
+        sig = re.sub(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', '<uuid>', sig)
+        
+        # 3. Strip Hex addresses and dynamic hashes (length >= 8 hex characters)
+        sig = re.sub(r'\b0x[0-9a-f]+\b', '<hex>', sig)
+        sig = re.sub(r'\b[0-9a-f]{8,}\b', '<hash>', sig)
+        
+        # 4. Replace standalone numbers/integers/floats (to group connection ports, IDs, counts)
+        sig = re.sub(r'\b\d+(?:\.\d+)?\b', '<num>', sig)
+        
+        # 5. Normalize whitespace and take first 150 chars
+        sig = re.sub(r'\s+', ' ', sig)
+        return sig[:150].strip()
+
     def register_or_recur_incident(self, app: str, log_item: Dict[str, Any], matched_rules: List[Dict[str, Any]], ai_proposal: str) -> str:
         """Registers a new incident or processes a recurrence/reopening of an existing one."""
         current_time = int(time.time())
         msg = log_item.get("message", "")
-        clean_msg_sig = msg[:120].strip()
-        error_signature = f"{app}:{clean_msg_sig}"
+        fingerprint = self._get_error_fingerprint(msg)
+        error_signature = f"{app}:{fingerprint}"
         
         try:
             with sqlite3.connect(self.db_path) as conn:
