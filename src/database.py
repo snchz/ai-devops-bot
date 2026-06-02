@@ -79,6 +79,14 @@ class Database:
                         commands TEXT
                     )
                 """)
+                
+                # Create settings table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    )
+                """)
                 conn.commit()
             
             # Auto-migrate and consolidate old duplicate incidents on startup
@@ -550,3 +558,36 @@ class Database:
         except Exception as e:
             logger.error(f"❌ Error al eliminar regla de conocimiento '{pattern}' de SQLite: {e}", exc_info=True)
             return False
+
+    # --- SETTINGS SQLite CRUD ---
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        """Retrieves a setting by key."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+                row = cursor.fetchone()
+                if row:
+                    return row[0]
+                return default
+        except Exception as e:
+            logger.error(f"❌ Error al obtener ajuste '{key}' de SQLite: {e}", exc_info=True)
+            return default
+
+    def set_setting(self, key: str, value: str) -> bool:
+        """Saves a setting."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO settings (key, value)
+                    VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """, (key, value))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error al guardar ajuste '{key}' en SQLite: {e}", exc_info=True)
+            return False
+

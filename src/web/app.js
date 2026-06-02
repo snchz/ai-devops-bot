@@ -12,14 +12,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const API_BASE = window.location.origin;
 
     // --- DOM ELEMENTS ---
-    // Sidebar Nav
     const navDashboard = document.getElementById("nav-dashboard");
     const navKnowledge = document.getElementById("nav-knowledge");
     const navMetrics = document.getElementById("nav-metrics");
+    const navSettings = document.getElementById("nav-settings");
     const views = {
         dashboard: document.getElementById("view-dashboard"),
         knowledge: document.getElementById("view-knowledge"),
-        metrics: document.getElementById("view-metrics")
+        metrics: document.getElementById("view-metrics"),
+        settings: document.getElementById("view-settings")
     };
 
     // Dashboard Elements
@@ -72,6 +73,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const ruleForm = document.getElementById("rule-form");
     const modalTitle = document.getElementById("modal-title");
     const fieldOriginalPattern = document.getElementById("field-original-pattern");
+    
+    // Settings Elements
+    const settingsForm = document.getElementById("settings-form");
+    const fieldPollInterval = document.getElementById("field-poll-interval");
     const fieldPattern = document.getElementById("field-pattern");
     const fieldDescription = document.getElementById("field-description");
     const fieldCause = document.getElementById("field-cause");
@@ -96,15 +101,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- NAVIGATION LOGIC ---
     function switchView(targetView) {
-        // Toggle Nav Buttons
         navDashboard.classList.toggle("active", targetView === "dashboard");
         navKnowledge.classList.toggle("active", targetView === "knowledge");
         navMetrics.classList.toggle("active", targetView === "metrics");
+        navSettings.classList.toggle("active", targetView === "settings");
 
-        // Toggle Content Views
         views.dashboard.classList.toggle("active", targetView === "dashboard");
         views.knowledge.classList.toggle("active", targetView === "knowledge");
         views.metrics.classList.toggle("active", targetView === "metrics");
+        views.settings.classList.toggle("active", targetView === "settings");
 
         // Load View Data
         if (targetView === "dashboard") {
@@ -113,12 +118,15 @@ document.addEventListener("DOMContentLoaded", () => {
             fetchKbRules();
         } else if (targetView === "metrics") {
             fetchMetricsAndHealth();
+        } else if (targetView === "settings") {
+            fetchSettings();
         }
     }
 
     navDashboard.addEventListener("click", () => switchView("dashboard"));
     navKnowledge.addEventListener("click", () => switchView("knowledge"));
     navMetrics.addEventListener("click", () => switchView("metrics"));
+    navSettings.addEventListener("click", () => switchView("settings"));
 
     // --- TOAST NOTIFICATIONS ---
     function showToast(message, type = "info") {
@@ -730,6 +738,47 @@ document.addEventListener("DOMContentLoaded", () => {
                 metricAlerts.textContent = metricVal;
             } else if (metricName === "ai_devops_bot_commands_executed_total") {
                 metricCommands.textContent = metricVal;
+            }
+        });
+    }
+
+    // --- SETTINGS LOGIC ---
+    async function fetchSettings() {
+        try {
+            const res = await fetch(`${API_BASE}/api/settings`);
+            if (!res.ok) throw new Error("Fallo al consultar configuración");
+            const settings = await res.json();
+            
+            if (settings.poll_interval_minutes !== undefined) {
+                fieldPollInterval.value = settings.poll_interval_minutes;
+            }
+        } catch (err) {
+            console.error(err);
+            showToast("Error al cargar la configuración.", "error");
+        }
+    }
+
+    if (settingsForm) {
+        settingsForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            
+            const payload = {
+                poll_interval_minutes: parseFloat(fieldPollInterval.value)
+            };
+
+            try {
+                const res = await fetch(`${API_BASE}/api/settings`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!res.ok) throw new Error("Fallo al guardar configuración");
+                
+                showToast("Configuración guardada exitosamente.", "success");
+            } catch (err) {
+                console.error(err);
+                showToast("Error al guardar la configuración.", "error");
             }
         });
     }

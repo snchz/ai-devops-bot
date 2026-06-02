@@ -204,7 +204,32 @@ class WebServer:
             await writer.drain()
             return
 
-        # 3. REST API: KNOWLEDGE BASE RULES (Consolidated SQLite CRUD)
+        # 3. REST API: SETTINGS
+        elif path == "/api/settings" and method == "GET":
+            # Return specific configuration values
+            settings = {
+                "poll_interval_minutes": float(await asyncio.to_thread(self.db.get_setting, "poll_interval_minutes", "1.0"))
+            }
+            resp_body = json.dumps(settings, ensure_ascii=False).encode("utf-8")
+            writer.write(self._make_response(200, "OK", "application/json", resp_body))
+            await writer.drain()
+            return
+            
+        elif path == "/api/settings" and method == "POST":
+            try:
+                payload = json.loads(body.decode("utf-8"))
+                for key, value in payload.items():
+                    await asyncio.to_thread(self.db.set_setting, key, str(value))
+                resp_body = b'{"success": true}'
+                writer.write(self._make_response(200, "OK", "application/json", resp_body))
+            except Exception as ex:
+                logger.error(f"Error procesando guardado de settings: {ex}")
+                resp_body = f'{{"error": "{str(ex)}"}}'.encode("utf-8")
+                writer.write(self._make_response(500, "Internal Server Error", "application/json", resp_body))
+            await writer.drain()
+            return
+
+        # 4. REST API: KNOWLEDGE BASE RULES (Consolidated SQLite CRUD)
         elif path == "/api/kb" and method == "GET":
             rules = await asyncio.to_thread(self.db.get_kb_rules)
             resp_body = json.dumps(rules, ensure_ascii=False).encode("utf-8")
