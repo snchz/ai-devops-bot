@@ -11,11 +11,32 @@ class Database:
     
     def __init__(self, db_path: str = "history.db"):
         self.db_path = db_path
+
+        # Ensure parent directory exists when possible. Config may already attempt this,
+        # but in containerized environments a mounted volume can hide permissions/ownership.
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+            except Exception:
+                # If we cannot create the directory here, we'll detect write issues later
+                logger.warning(f"⚠️ No se pudo crear el directorio para la DB: {db_dir}")
+
         self.init_db()
 
     def init_db(self):
         """Initializes database schema if it does not exist, migrating if necessary."""
         try:
+            # Quick writable check: try to create and remove a small temp file in the DB dir.
+            db_dir = os.path.dirname(self.db_path) or os.getcwd()
+            try:
+                testfile = os.path.join(db_dir, ".db_write_test")
+                with open(testfile, "w", encoding="utf-8") as tf:
+                    tf.write("")
+                os.remove(testfile)
+            except Exception:
+                logger.warning(f"⚠️ No se detecta permiso de escritura en '{db_dir}'. Intentando abrir la DB de todas formas...")
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
@@ -65,7 +86,31 @@ class Database:
             
             logger.info(f"💾 Base de datos SQLite consolidada inicializada exitosamente en: {self.db_path}")
         except Exception as e:
+            # If opening the configured DB failed, attempt fallback locations that are
+            # more likely a) writable or b) not a mounted volume with root ownership.
             logger.error(f"❌ Error al inicializar la base de datos SQLite en '{self.db_path}': {e}", exc_info=True)
+
+            fallbacks = [
+                os.path.join(os.getcwd(), "history.db"),
+                os.path.join(os.path.expanduser("~"), ".ai-devops-bot", "history.db"),
+                os.path.join("/tmp", "history.db")
+            ]
+            for fb in fallbacks:
+                try:
+                    fb_dir = os.path.dirname(fb)
+                    if fb_dir:
+                        os.makedirs(fb_dir, exist_ok=True)
+                    with sqlite3.connect(fb) as conn:
+                        conn.execute("PRAGMA user_version")
+                    self.db_path = fb
+                    logger.warning(f"🔁 Se usará la ruta de respaldo para la DB: {self.db_path}")
+                    # Retry initialization with the fallback path
+                    self.init_db()
+                    return
+                except Exception:
+                    continue
+
+            logger.error("❌ No fue posible inicializar ninguna base de datos SQLite. Verifique permisos y montaje de volúmenes.")
 
     def _migrate_and_consolidate_signatures(self):
         """
