@@ -53,12 +53,6 @@ class Config:
         elif self.ai_provider == "gemini" and not self.gemini_api_key:
             raise ValueError("GEMINI_API_KEY (o GROQ_API_KEY) es obligatorio para el proveedor 'gemini'.")
         
-        # Polling Configuration (Default 60 seconds)
-        try:
-            self.poll_interval = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
-        except ValueError:
-            logger.warning("POLL_INTERVAL_SECONDS no es un número válido. Usando valor por defecto: 60s")
-            self.poll_interval = 60
 
         # Alert Fatigue / Cooldown Configuration (Default 15 minutes)
         try:

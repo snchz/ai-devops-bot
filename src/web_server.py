@@ -237,7 +237,7 @@ class WebServer:
         elif path == "/api/settings" and method == "GET":
             # Return specific configuration values
             settings = {
-                "poll_interval_minutes": float(await asyncio.to_thread(self.db.get_setting, "poll_interval_minutes", "1.0"))
+                "poll_interval_minutes": float(await asyncio.to_thread(self.db.get_setting, "poll_interval_minutes", "5.0"))
             }
             resp_body = json.dumps(settings, ensure_ascii=False).encode("utf-8")
             writer.write(self._make_response(200, "OK", "application/json", resp_body))

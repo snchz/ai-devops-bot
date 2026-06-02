@@ -260,16 +260,16 @@ class LogMonitor:
             except Exception as e:
                 logger.error(f"Excepción crítica no controlada en el ciclo de monitoreo: {e}", exc_info=True)
                 
-            # Leer el intervalo de revisión (en minutos) desde la base de datos (con fallback a config)
+            # Leer el intervalo de revisión (en minutos) desde la base de datos (por defecto 5 min)
             poll_interval_minutes = await asyncio.to_thread(
                 self.db.get_setting, 
                 "poll_interval_minutes", 
-                str(self.config.poll_interval / 60.0)
+                "5.0"
             )
             try:
                 poll_interval_seconds = int(float(poll_interval_minutes) * 60)
             except ValueError:
-                poll_interval_seconds = self.config.poll_interval
+                poll_interval_seconds = 300
                 
             logger.info(f"Durmiendo el proceso durante {poll_interval_seconds} segundos ({(poll_interval_seconds/60.0):.2f} min)...")
             await asyncio.sleep(poll_interval_seconds)

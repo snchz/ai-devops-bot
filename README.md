@@ -115,7 +115,6 @@ TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
 
 # Monitoring & Fatigue Prevention Configuration
-POLL_INTERVAL_SECONDS=60
 COOLDOWN_MINUTES=15
 
 # Observability Telemetry Port (defaults to 8000)
@@ -344,7 +343,6 @@ TELEGRAM_CHAT_ID=tu_telegram_chat_id_o_canal_aqui
 TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
 
 # Configuración de Frecuencia y Mitigación de Spam
-POLL_INTERVAL_SECONDS=60
 COOLDOWN_MINUTES=15
 
 # Puerto de Observabilidad y Salud (default: 8000)
@@ -353,7 +351,6 @@ HEALTHCHECK_PORT=8000
 # Opcional: Nivel de detalle de logs (INFO o DEBUG)
 LOG_LEVEL=INFO
 ```del Monitor
-POLL_INTERVAL_SECONDS=60
 # Opcional: Nivel de detalle de logs (INFO o DEBUG)
 LOG_LEVEL=INFO
 ```
