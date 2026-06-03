@@ -84,10 +84,14 @@
                 <div class="dashboard-grid">
                     <!-- Left Column: Incidents List -->
                     <div class="panel list-panel">
-                        <div class="panel-header">
-                            <div class="search-box">
+                        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                            <div class="search-box" style="flex: 1;">
                                 <i data-lucide="search"></i>
                                 <input type="text" id="incident-search" placeholder="Buscar por aplicación o error...">
+                            </div>
+                            <div class="filter-box" style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" id="show-resolved" style="cursor: pointer;">
+                                <label for="show-resolved" style="font-size: 13px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Mostrar resueltas</label>
                             </div>
                         </div>
                         <div class="panel-body">

@@ -26,6 +26,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Dashboard Elements
     const btnRefreshIncidents = document.getElementById("btn-refresh-incidents");
     const inputIncidentSearch = document.getElementById("incident-search");
+    const checkboxShowResolved = document.getElementById("show-resolved");
     const listIncidents = document.getElementById("incidents-list");
     const loaderIncidents = document.getElementById("incidents-loader");
     const emptyIncidents = document.getElementById("incidents-empty");
@@ -203,9 +204,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function renderIncidentsList() {
         const query = inputIncidentSearch.value.trim().toLowerCase();
+        const showResolved = checkboxShowResolved.checked;
         
         // Filter incidents
         const filtered = incidents.filter(inc => {
+            if (!showResolved && inc.status !== "ABIERTA") {
+                return false;
+            }
             const matchesApp = inc.apps.some(app => app.toLowerCase().includes(query));
             const matchesNum = inc.incident_num.toLowerCase().includes(query);
             const matchesProposal = inc.ai_proposal.toLowerCase().includes(query);
@@ -408,6 +413,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     btnRefreshIncidents.addEventListener("click", fetchIncidents);
     inputIncidentSearch.addEventListener("input", renderIncidentsList);
+    checkboxShowResolved.addEventListener("change", renderIncidentsList);
 
     btnDeleteIncident.addEventListener("click", async () => {
         if (!currentIncidentId) return;
