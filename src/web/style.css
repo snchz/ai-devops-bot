@@ -308,6 +308,17 @@ body {
     background-color: var(--bg-card-hover);
 }
 
+.btn-danger {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: var(--theme-danger);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.btn-danger:hover {
+    background-color: var(--theme-danger);
+    color: var(--text-primary);
+}
+
 .btn-danger-icon {
     background-color: rgba(239, 68, 68, 0.08);
     color: var(--theme-danger);

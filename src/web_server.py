@@ -217,6 +217,18 @@ class WebServer:
             return
             
         elif path.startswith("/api/incidents/") and method == "DELETE":
+            # Check if deleting all
+            if path == "/api/incidents/all":
+                success = await asyncio.to_thread(self.db.delete_all_incidents)
+                if success:
+                    resp_body = b'{"success": true}'
+                    writer.write(self._make_response(200, "OK", "application/json", resp_body))
+                else:
+                    resp_body = b'{"error": "Failed to delete all incidents"}'
+                    writer.write(self._make_response(500, "Internal Server Error", "application/json", resp_body))
+                await writer.drain()
+                return
+
             # Extract Incident ID
             try:
                 incident_id = int(path.split("/")[-1])

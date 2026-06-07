@@ -25,6 +25,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Dashboard Elements
     const btnRefreshIncidents = document.getElementById("btn-refresh-incidents");
+    const btnDeleteAllIncidents = document.getElementById("btn-delete-all-incidents");
     const inputIncidentSearch = document.getElementById("incident-search");
     const checkboxShowResolved = document.getElementById("show-resolved");
     const listIncidents = document.getElementById("incidents-list");
@@ -433,6 +434,26 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (err) {
             console.error(err);
             showToast("Error al intentar eliminar el incidente.", "error");
+        }
+    });
+
+    btnDeleteAllIncidents.addEventListener("click", async () => {
+        if (!confirm("¿Estás seguro de que deseas eliminar TODAS las alertas del historial? Esta acción no se puede deshacer.")) return;
+
+        try {
+            const res = await fetch(`${API_BASE}/api/incidents/all`, {
+                method: "DELETE"
+            });
+            if (!res.ok) throw new Error("Fallo al eliminar todos los incidentes");
+            showToast("Todos los incidentes han sido eliminados exitosamente.", "success");
+            
+            currentIncidentId = null;
+            detailContent.classList.add("hide");
+            detailPlaceholder.classList.remove("hide");
+            fetchIncidents();
+        } catch (err) {
+            console.error(err);
+            showToast("Error al intentar eliminar todos los incidentes.", "error");
         }
     });
 

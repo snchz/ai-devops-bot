@@ -554,6 +554,20 @@ class Database:
             logger.error(f"❌ Error al eliminar incidente #{incident_id}: {e}", exc_info=True)
             return False
 
+    def delete_all_incidents(self) -> bool:
+        """Deletes all incidents from the database."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM incidents")
+                conn.commit()
+                rows_affected = cursor.rowcount
+            logger.info(f"🗑️ Se han eliminado {rows_affected} incidentes del historial.")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error al eliminar todos los incidentes: {e}", exc_info=True)
+            return False
+
     # --- KNOWLEDGE BASE (kb_rules) SQLite CRUD ---
     
     def get_kb_rules(self) -> List[Dict[str, Any]]:
