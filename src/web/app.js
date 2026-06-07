@@ -171,6 +171,24 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("live-time").textContent = timeStr;
     }, 1000);
 
+    // --- VERSION FETCH ---
+    async function fetchAppVersion() {
+        try {
+            const res = await fetch(`${API_BASE}/api/version`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.version && data.version !== "unknown") {
+                    document.getElementById("app-version").textContent = `v${data.version}`;
+                }
+            }
+        } catch (err) {
+            console.error("Error al obtener la versión:", err);
+        }
+    }
+    
+    // Initial fetch of version
+    fetchAppVersion();
+
     // --- INCIDENTS DASHBOARD LOGIC ---
     async function fetchIncidents() {
         loaderIncidents.classList.remove("hide");

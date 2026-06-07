@@ -148,6 +148,22 @@ class WebServer:
             await writer.drain()
             return
             
+        elif path == "/api/version" and method == "GET":
+            # Attempt to read VERSION file in root directory
+            version = "unknown"
+            root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            version_path = os.path.join(root_dir, "VERSION")
+            if os.path.exists(version_path):
+                try:
+                    with open(version_path, "r") as f:
+                        version = f.read().strip()
+                except Exception:
+                    pass
+            resp_body = json.dumps({"version": version}, ensure_ascii=False).encode("utf-8")
+            writer.write(self._make_response(200, "OK", "application/json", resp_body))
+            await writer.drain()
+            return
+            
         # 2. REST API: INCIDENTS HISTORY
         elif path == "/api/incidents" and method == "GET":
             limit = int(query_params.get("limit", "100"))

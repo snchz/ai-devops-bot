@@ -72,7 +72,7 @@ class LokiClient:
             return all_logs
             
         except httpx.RequestError as e:
-            logger.error(f"Error de red al conectar con Loki en {url}: {e}")
+            logger.error(f"Error de red al conectar con Loki en {url}: {type(e).__name__} - {str(e)}")
             return []
         except Exception as e:
             logger.error(f"Excepción inesperada en LokiClient: {e}")
@@ -146,7 +146,7 @@ class LokiClient:
             return all_logs
             
         except httpx.RequestError as e:
-            logger.error(f"Error de red al conectar con Loki en {url}: {e}")
+            logger.error(f"Error de red al conectar con Loki en {url}: {type(e).__name__} - {str(e)}")
             return []
         except Exception as e:
             logger.error(f"Excepción inesperada al consultar contexto en LokiClient: {e}")
