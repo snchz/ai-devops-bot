@@ -136,10 +136,10 @@ class WebServer:
                 "# HELP ai_devops_bot_errors_detected_total Total raw error logs fetched",
                 "# TYPE ai_devops_bot_errors_detected_total counter",
                 f"ai_devops_bot_errors_detected_total {METRICS['errors_detected']}",
-                "# HELP ai_devops_bot_alerts_sent_total Total alerts successfully sent to Telegram",
+                "# HELP ai_devops_bot_alerts_sent_total Total alerts successfully generated",
                 "# TYPE ai_devops_bot_alerts_sent_total counter",
                 f"ai_devops_bot_alerts_sent_total {METRICS['alerts_sent']}",
-                "# HELP ai_devops_bot_commands_executed_total Total commands executed via Telegram buttons",
+                "# HELP ai_devops_bot_commands_executed_total Total commands executed via Web UI buttons",
                 "# TYPE ai_devops_bot_commands_executed_total counter",
                 f"ai_devops_bot_commands_executed_total {METRICS['commands_executed']}"
             ]

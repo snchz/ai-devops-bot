@@ -1,3 +1,12 @@
+# AI DevOps Log Monitor & Analyzer Bot
+# This application intelligently monitors logs managed in Grafana Loki,
+# analyzes critical errors and anomalies using Meta Llama 3.3 (via Groq),
+# and delivers diagnostics, root-cause analyses, and resolution commands
+# directly to your Web UI dashboard.
+#
+# Bot de monitorización de logs de DevOps con IA. Analiza errores desde 
+# Loki, consulta soluciones mediante Llama 3.3, y muestra diagnósticos
+# accionables en su interfaz Web integrada.
 version: "3.8"
 
 services:

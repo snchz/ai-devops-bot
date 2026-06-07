@@ -12,9 +12,8 @@ Choose your language / Selecciona tu idioma:
 [![Docker Slim](https://img.shields.io/badge/docker-slim--3.11-cyan.svg)](https://hub.docker.com/_/python)
 [![AI Groq](https://img.shields.io/badge/AI-Groq%20Llama%203.3-orange.svg)](https://groq.com/)
 [![Grafana Loki](https://img.shields.io/badge/Loki-Logs-red.svg)](https://grafana.com/oss/loki/)
-[![Telegram Bot](https://img.shields.io/badge/Telegram-Alerts-blue.svg)](https://core.telegram.org/bots)
 
-A **Senior DevOps** production-grade tool designed to intelligently monitor logs managed in **Grafana Loki**, analyze critical errors and anomalies using the ultra-fast **Meta Llama 3.3 (70B) AI via Groq**, and deliver highly precise diagnostics, root-cause analyses, and console-ready resolution commands formatted in Markdown directly to your **Telegram** channel or chat.
+A **Senior DevOps** production-grade tool designed to intelligently monitor logs managed in **Grafana Loki**, analyze critical errors and anomalies using the ultra-fast **Meta Llama 3.3 (70B) AI via Groq**, and deliver highly precise diagnostics, root-cause analyses, and console-ready resolution commands formatted in Markdown directly to your **Web UI** dashboard.
 
 ---
 
@@ -30,7 +29,7 @@ graph TD
     E -->|6. Filter duplicates & self-loops| E
     E -->|7. Batch Diagnostic Prompt| G["Groq API Llama 3.3"]
     G -->|8. Solution & console commands| E
-    E -->|9. Markdown Notification| H["Telegram API"]
+    E -->|9. Present in Web UI| H["Dashboard"]
 ```
 
 
@@ -38,20 +37,21 @@ graph TD
 2.  **Continuous Deployment (CD)**: Your server's **Watchtower** container scans GHCR, automatically downloads the new image in the background, and restarts the bot with zero manual downtime.
 3.  **Anti-Loop LogQL Filtering**: The bot queries `/loki/api/v1/query_range` periodically. It applies an advanced LogQL filter to **ignore its own container logs and Loki's internal metric queries**, preventing infinite self-matching alert loops.
 4.  **In-Memory Deduplication & Cleaning**: It tracks the nanosecond-level timestamp of the last processed log. To prevent data loss from Loki ingestion pipeline delays, it polls a overlapping 2-minute safety window and dedupes duplicates in memory.
-5.  **ANSI Code Stripping**: Automatically strips ANSI console color escape sequences (`\x1b\[[0-9;]*[a-zA-Z]`), producing clean Telegram Markdown and allowing perfect deduplication of identical docker log streams.
-6.  **AI Local RAG (Knowledge Base)**: Parses a local `knowledge_base.json` rulebook. If an error matches a pattern (e.g. `pvpc_hourly_pricing`), it **injects your custom diagnostic notes and exact bash fix commands** directly into Llama 3.3's prompt, overriding standard AI assumptions with your specific knowledge.
+5.  **ANSI Code Stripping**: Automatically strips ANSI console color escape sequences (`\x1b\[[0-9;]*[a-zA-Z]`), producing clean Markdown and allowing perfect deduplication of identical docker log streams.
+6.  **AI Local RAG (Knowledge Base)**: Parses a local SQLite database (`history.db`) containing a RAG rulebook. If an error matches a pattern (e.g. `pvpc_hourly_pricing`), it **injects your custom diagnostic notes and exact bash fix commands** directly into Llama 3.3's prompt, overriding standard AI assumptions with your specific knowledge.
 
 ---
 
 ## ✨ Main Features
 
 *   **Asynchronous Web Control Center (Web UI)**: A premium, dark-themed, glassmorphic dashboard served natively on `HEALTHCHECK_PORT` (default `8000`) with zero external Python dependencies.
-*   **Full-Detail Incident Explorer**: View untruncated raw error log streams from Grafana Loki along with the AI's diagnostic proposal (complete with one-click code copy buttons) in a gorgeous side-by-side split screen view, bypassing all size limitations of Telegram.
-*   **Interactive RAG Knowledge Base Editor**: A fully interactive Web UI to Add, Edit, or Delete custom troubleshooting patterns and resolution commands in `knowledge_base.json` with instant real-time reloading.
+*   **Full-Detail Incident Explorer**: View untruncated raw error log streams from Grafana Loki along with the AI's diagnostic proposal (complete with one-click code copy buttons) in a gorgeous side-by-side split screen view, without any size limitations.
+*   **Interactive RAG Knowledge Base Editor**: A fully interactive Web UI to Add, Edit, or Delete custom troubleshooting patterns and resolution commands in the SQLite database with instant real-time reloading.
+*   **Application Versioning**: Automated version tracking on each deployment, displayed programmatically in the UI.
+*   **Incident Management**: Filter incidents by resolved/unresolved status and securely delete historical records from the SQLite database directly from the dashboard.
 *   **SQLite Incident History Persistence**: Uses a local SQLite database (`history.db`) to record log telemetry history across restarts.
-*   **Fully Asynchronous Engine**: Built completely on `asyncio` and `httpx` for non-blocking concurrent log processing, health monitoring, and Telegram messaging.
-*   **Secure Self-Healing Subprocess Execution**: Click `[ Ejecutar Solución ⚡ ]` directly on Telegram alerts to trigger remote shell resolution commands in a 30s async subprocess!
-*   **Operator Authentication Access Control**: Enforces whitelisting via `TELEGRAM_ALLOWED_USER_IDS` to securely block unauthorized execution from arbitrary Telegram users.
+*   **Fully Asynchronous Engine**: Built completely on `asyncio` and `httpx` for non-blocking concurrent log processing and health monitoring.
+*   **Secure Self-Healing Subprocess Execution**: Click `[ Ejecutar Solución ⚡ ]` directly on the dashboard alerts to trigger remote shell resolution commands in a 30s async subprocess!
 *   **Polymorphic AI Providers**: Toggle instantly between Groq (Meta Llama 3.3), Google Gemini (natively via REST), and Ollama (local AI models running on your hardware) via `AI_PROVIDER`.
 *   **Smart Cooldown Alert Fatigue Prevention**: Automatically suppresses duplicate error logs within the configured `COOLDOWN_MINUTES` window to keep your channels quiet.
 *   **Prometheus & Healthcheck Server**: Exposes `/healthz` and standard `/metrics` ports asynchronously using zero third-party dependencies.
@@ -65,12 +65,12 @@ graph TD
 
 The project has the following clean, modular structure:
 
-1.  **[`bot.py`](file:///d:/Aplicaciones/ai-devops-bot/bot.py)**: Main Python script containing the configuration manager, Loki API client, Llama 3.3 Groq conector, and Telegram dispatcher.
+1.  **[`bot.py`](file:///d:/Aplicaciones/ai-devops-bot/bot.py)**: Main Python script containing the configuration manager, Loki API client, and Llama 3.3 Groq conector.
 2.  **[`requirements.txt`](file:///d:/Aplicaciones/ai-devops-bot/requirements.txt)**: Lightweight dependency definitions (`requests` and `python-dotenv`).
 3.  **[`Dockerfile`](file:///d:/Aplicaciones/ai-devops-bot/Dockerfile)**: Multi-stage, slim `python:3.11-slim` container executing securely under a non-root `appuser`.
 4.  **[`docker-compose.yml`](file:///d:/Aplicaciones/ai-devops-bot/docker-compose.yml)**: Composition file for Dockge, mapping service names and container mounts.
 5.  **[`.github/workflows/docker-publish.yml`](file:///d:/Aplicaciones/ai-devops-bot/.github/workflows/docker-publish.yml)**: Continuous integration pipeline to build and publish to GHCR.
-6.  **[`knowledge_base.json`](file:///d:/Aplicaciones/ai-devops-bot/knowledge_base.json)**: Local RAG rulebook containing custom troubleshooting matching patterns and solutions.
+6.  **[`data/`](file:///d:/Aplicaciones/ai-devops-bot/data/)**: Directory containing the local SQLite database (`history.db`) for incident persistence and RAG rules.
 7.  **[`.env.example`](file:///d:/Aplicaciones/ai-devops-bot/.env.example)**: Environment template with blank placeholder fields.
 8.  **[`README.md`](file:///d:/Aplicaciones/ai-devops-bot/README.md)**: This bilingual documentation file.
 
@@ -106,13 +106,6 @@ GEMINI_MODEL=gemini-2.5-flash
 # Provider C: Ollama (Local AI)
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=llama3
-
-# Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-TELEGRAM_CHAT_ID=your_telegram_chat_id_here
-
-# Remoted Command Whitelist (comma-separated operator Telegram User IDs)
-TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
 
 # Monitoring & Fatigue Prevention Configuration
 COOLDOWN_MINUTES=15
@@ -159,7 +152,7 @@ LOG_LEVEL=INFO
     git clone git@github.com:snchz/ai-devops-bot.git ai-devops-bot
     ```
 2.  **Verify `docker-compose.yml` mounts**:
-    Make sure your compose file includes the volume mount to reload rules dynamically:
+    Make sure your compose file includes the volume mount to persist data dynamically:
     ```yaml
     services:
       ai-devops-bot:
@@ -171,6 +164,7 @@ LOG_LEVEL=INFO
         env_file:
           - .env
         volumes:
+          - ./data:/app/data
     ```
 3.  **Start Stack in Dockge**:
     *   Open your **Dockge** web UI. Refresh, select `ai-devops-bot` under **Inactive** sidebar.
@@ -196,7 +190,7 @@ git push
 3.  Under **Change visibility**, change it to **Public** and save. *(Completely secure, credentials stay in your server's local `.env`)*.
 
 #### Step 3: Configure in Dockge
-Change your compose file to expose the Web UI port (e.g. `8000`) and mount both `knowledge_base.json` (as read-write) and `history.db` (for incident history persistence) in your server's host folder:
+Change your compose file to expose the Web UI port (e.g. `8000`) and mount the `data` directory (for incident history and knowledge base persistence) in your server's host folder:
 
 ```yaml
 version: "3.8"
@@ -211,21 +205,16 @@ services:
     env_file:
       - .env
     volumes:
-      - /home/leif/docker/configs/ai-devops-bot/history.db:/app/history.db
+      - /home/leif/docker/configs/ai-devops-bot/data:/app/data
 ```
 Click **Save**, then **Active**.
 
 > [!CAUTION]
 > **Host Files & Permissions Troubleshooting:**
-> 1. **Avoid Directory Creation Bug**: If `history.db` or `knowledge_base.json` do not exist as files on your host server when starting the container, **Docker will create them as directories**, crashing the bot with `unable to start container process... not a directory` errors.
->    * To fix/prevent this, execute these commands on your host server before starting the container:
->      ```bash
->      rm -rf /home/leif/docker/configs/ai-devops-bot/history.db
->      touch /home/leif/docker/configs/ai-devops-bot/history.db
->      ```
-> 2. **Resolve SQLite "Unable to Open Database File" Error**: Since the container runs under a non-root `appuser` (UID `10001`), it must have read-write access to these host files. Grant correct permissions by running:
+> 1. **Resolve SQLite "Unable to Open Database File" Error**: Since the container runs under a non-root `appuser` (UID `10001`), it must have read-write access to the mounted directory. Grant correct permissions by running:
 >    ```bash
->    chmod 666 /home/leif/docker/configs/ai-devops-bot/history.db
+>    mkdir -p /home/leif/docker/configs/ai-devops-bot/data
+>    chmod -R 777 /home/leif/docker/configs/ai-devops-bot/data
 >    ```
 
 #### Step 4: Let Watchtower do the magic
@@ -240,9 +229,8 @@ Since you have **Watchtower** running, it will automatically poll GHCR. When it 
 [![Docker Slim](https://img.shields.io/badge/docker-slim--3.11-cyan.svg)](https://hub.docker.com/_/python)
 [![IA Groq](https://img.shields.io/badge/AI-Groq%20Llama%203.3-orange.svg)](https://groq.com/)
 [![Grafana Loki](https://img.shields.io/badge/Loki-Logs-red.svg)](https://grafana.com/oss/loki/)
-[![Telegram Bot](https://img.shields.io/badge/Telegram-Alerts-blue.svg)](https://core.telegram.org/bots)
 
-Una herramienta de nivel **Senior DevOps** diseñada para monitorizar de forma inteligente los logs gestionados en **Grafana Loki**, analizar anomalías y errores críticos mediante la inteligencia artificial ultra-rápida de **Meta Llama 3.3 (70B) en Groq**, y enviar diagnósticos precisos junto con soluciones inmediatas y comandos de consola formateados en Markdown directo a tu canal o chat de **Telegram**.
+Una herramienta de nivel **Senior DevOps** diseñada para monitorizar de forma inteligente los logs gestionados en **Grafana Loki**, analizar anomalías y errores críticos mediante la inteligencia artificial ultra-rápida de **Meta Llama 3.3 (70B) en Groq**, y enviar diagnósticos precisos junto con soluciones inmediatas y comandos de consola formateados en Markdown directo a la interfaz **Web** integrada.
 
 ---
 
@@ -258,7 +246,7 @@ graph TD
     E -->|6. Filtra duplicados y auto-bucles| E
     E -->|7. Diagnóstico en Lote| G["Groq API Llama 3.3"]
     G -->|8. Solución e instrucciones| E
-    E -->|9. Notificación en Markdown| H["Telegram API"]
+    E -->|9. Panel Web UI| H["Dashboard"]
 ```
 
 
@@ -266,20 +254,21 @@ graph TD
 2.  **Despliegue Continuo (CD)**: Tu contenedor **Watchtower** escanea el registro, descarga la nueva imagen al vuelo y reinicia el bot de forma transparente y automática.
 3.  **Sondeo Antibucles e Ingestión**: El bot realiza peticiones periódicas a Loki. Aplica un filtro LogQL avanzado para **ignorar sus propios logs y los logs de auditoría de Loki**, evitando bucles de retroalimentación infinita.
 4.  **Deduplicación en Memoria**: Mantiene en memoria el timestamp en nanosegundos del último log procesado. Compensa el retraso de ingesta de Loki consultando una ventana de seguridad en el pasado, discriminando duplicados en memoria.
-5.  **Limpiador de códigos ANSI**: Limpia automáticamente los códigos de escape de color de consola ANSI (`\x1b\[[0-9;]*[a-zA-Z]`) de los logs, produciendo un Markdown de Telegram muy limpio y permitiendo una deduplicación perfecta de las trazas de Docker.
-6.  **IA Local RAG (Base de Conocimientos)**: Parsea una base de conocimientos local `knowledge_base.json`. Si un error coincide con un patrón (ej. `pvpc_hourly_pricing`), **inyecta tus notas de diagnóstico y tus comandos bash de solución directamente en el prompt del modelo de IA**, priorizando tu conocimiento técnico sobre las sugerencias del modelo.
+5.  **Limpiador de códigos ANSI**: Limpia automáticamente los códigos de escape de color de consola ANSI (`\x1b\[[0-9;]*[a-zA-Z]`) de los logs, produciendo un Markdown muy limpio y permitiendo una deduplicación perfecta de las trazas de Docker.
+6.  **IA Local RAG (Base de Conocimientos)**: Parsea una base de datos local SQLite (`history.db`) que actúa como mapa de conocimiento. Si un error coincide con un patrón (ej. `pvpc_hourly_pricing`), **inyecta tus notas de diagnóstico y tus comandos bash de solución directamente en el prompt del modelo de IA**, priorizando tu conocimiento técnico sobre las sugerencias del modelo.
 
 ---
 
 ## ✨ Características Principales
 
 *   **Centro de Control Web Asíncrono (Web UI)**: Un panel de control premium con estética oscura y *glassmorphic* servido de forma nativa en `HEALTHCHECK_PORT` (por defecto `8000`) sin dependencias de librerías externas de Python.
-*   **Explorador de Incidentes a Detalle Completo**: Visualiza de forma paralela el flujo de logs de error completo de Loki y el diagnóstico de la IA con formato Markdown enriquecido (con copia en un clic de comandos de consola), omitiendo el límite de 4000 caracteres de Telegram.
-*   **Editor Visual del Mapa de Conocimiento**: Modales interactivos para Añadir, Modificar o Eliminar de forma dinámica las reglas del RAG local en `knowledge_base.json` con recarga automática instantánea en caliente.
+*   **Explorador de Incidentes a Detalle Completo**: Visualiza de forma paralela el flujo de logs de error completo de Loki y el diagnóstico de la IA con formato Markdown enriquecido (con copia en un clic de comandos de consola), sin límite de caracteres.
+*   **Editor Visual del Mapa de Conocimiento**: Modales interactivos para Añadir, Modificar o Eliminar de forma dinámica las reglas del RAG local en la base de datos con recarga automática instantánea en caliente.
+*   **Versionado de Aplicación Automático**: Seguimiento automático de la versión en cada despliegue con visualización programática en la UI.
+*   **Gestión de Incidentes**: Filtra los incidentes por estado (resuelto/no resuelto) y permite eliminar registros históricos del SQLite directamente desde el panel.
 *   **Persistencia Histórica de Incidentes en SQLite**: Utiliza una base de datos local SQLite (`history.db`) para almacenar todo el historial de alertas detectadas de forma permanente.
-*   **Motor Totalmente Asíncrono**: Basado en `asyncio` y `httpx` para un procesamiento de logs, métricas y mensajería ultrarrápido y no bloqueante.
-*   **Autocurado Interactivo Seguro**: Ejecuta comandos de consola remotos directamente pulsando `[ Ejecutar Solución ⚡ ]` en tu chat de Telegram en un subproceso asíncrono con timeout de 30s.
-*   **Control de Acceso mediante Whitelist**: Valida al operador mediante `TELEGRAM_ALLOWED_USER_IDS` bloqueando ejecuciones de usuarios de Telegram no autorizados.
+*   **Motor Totalmente Asíncrono**: Basado en `asyncio` y `httpx` para un procesamiento de logs y métricas ultrarrápido y no bloqueante.
+*   **Autocurado Interactivo Seguro**: Ejecuta comandos de consola remotos directamente pulsando `[ Ejecutar Solución ⚡ ]` en el dashboard en un subproceso asíncrono con timeout de 30s.
 *   **Proveedores de IA Polimórficos**: Elige dinámicamente tu cerebro de IA (`AI_PROVIDER`) entre Groq (Llama 3.3), Google Gemini (REST nativo sin SDKs) y Ollama (IA local ejecutándose en tu servidor).
 *   **Prevención de Fatiga de Alertas (Cooldown)**: Silencia alertas repetidas para el mismo error durante el tiempo configurado en `COOLDOWN_MINUTES` para evitar el spam en tus canales.
 *   **Servidor HTTP de Salud y Prometheus**: Expone endpoints de `/healthz` y `/metrics` compatibles con Prometheus de forma nativa sin dependencias adicionales.
@@ -298,7 +287,7 @@ El proyecto consta de la siguiente estructura limpia de archivos:
 3.  **[`Dockerfile`](file:///d:/Aplicaciones/ai-devops-bot/Dockerfile)**: Dockerfile seguro y optimizado con ejecución no root.
 4.  **[`docker-compose.yml`](file:///d:/Aplicaciones/ai-devops-bot/docker-compose.yml)**: Configuración lista para orquestar y desplegar con Dockge o docker-compose.
 5.  **[`.github/workflows/docker-publish.yml`](file:///d:/Aplicaciones/ai-devops-bot/.github/workflows/docker-publish.yml)**: Flujo CI/CD automatizado para compilar y subir a GHCR.
-6.  **[`knowledge_base.json`](file:///d:/Aplicaciones/ai-devops-bot/knowledge_base.json)**: Archivo JSON local de RAG que lista patrones, diagnósticos conocidos y comandos específicos de reparación.
+6.  **[`data/`](file:///d:/Aplicaciones/ai-devops-bot/data/)**: Directorio que contiene la base de datos local SQLite (`history.db`) para el historial de incidentes y las reglas RAG.
 7.  **[`.env.example`](file:///d:/Aplicaciones/ai-devops-bot/.env.example)**: Plantilla con los campos de configuración vacíos.
 8.  **[`README.md`](file:///d:/Aplicaciones/ai-devops-bot/README.md)**: Este archivo de documentación bilingüe.
 
@@ -335,22 +324,12 @@ GEMINI_MODEL=gemini-2.5-flash
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=llama3
 
-# Configuración de Telegram Bot
-TELEGRAM_BOT_TOKEN=tu_telegram_bot_token_aqui
-TELEGRAM_CHAT_ID=tu_telegram_chat_id_o_canal_aqui
-
-# Seguridad del Autocurado (Whitelisting de IDs de usuario de Telegram autorizados, separados por comas)
-TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
-
 # Configuración de Frecuencia y Mitigación de Spam
 COOLDOWN_MINUTES=15
 
 # Puerto de Observabilidad y Salud (default: 8000)
 HEALTHCHECK_PORT=8000
 
-# Opcional: Nivel de detalle de logs (INFO o DEBUG)
-LOG_LEVEL=INFO
-```del Monitor
 # Opcional: Nivel de detalle de logs (INFO o DEBUG)
 LOG_LEVEL=INFO
 ```
@@ -392,7 +371,7 @@ Si deseas compilar la imagen localmente en el servidor:
     git clone git@github.com:snchz/ai-devops-bot.git ai-devops-bot
     ```
 2.  **Configurar docker-compose.yml**:
-    Asegúrate de incluir el montaje del volumen de conocimientos para recarga en caliente:
+    Asegúrate de incluir el montaje del volumen de datos para la persistencia del SQLite:
     ```yaml
     services:
       ai-devops-bot:
@@ -404,6 +383,7 @@ Si deseas compilar la imagen localmente en el servidor:
         env_file:
           - .env
         volumes:
+          - ./data:/app/data
     ```
 3.  **Iniciar en Dockge**:
     *   Abre la web de **Dockge** y verás el stack `ai-devops-bot` inactivo.
@@ -429,7 +409,7 @@ git push
 3.  Bajo **Change visibility**, selecciónalo como **Public** (Público) y guarda. *(Es seguro ya que las credenciales van en tu `.env` local, no en la imagen).*
 
 #### Paso 3: Configurar en Dockge
-Abre **Dockge** y edita tu archivo `docker-compose.yml` para exponer el puerto del panel (ej. `8000`) y mapear en modo lectura y escritura tanto `knowledge_base.json` como la base de datos `history.db`:
+Abre **Dockge** y edita tu archivo `docker-compose.yml` para exponer el puerto del panel (ej. `8000`) y mapear en modo lectura y escritura el directorio `data` que contendrá la base de datos `history.db`:
 
 ```yaml
 version: "3.8"
@@ -444,21 +424,16 @@ services:
     env_file:
       - .env
     volumes:
-      - /home/leif/docker/configs/ai-devops-bot/history.db:/app/history.db
+      - /home/leif/docker/configs/ai-devops-bot/data:/app/data
 ```
 Haz clic en **Save** y luego en **Active**. 
 
 > [!CAUTION]
-> **Solución de Problemas de Archivos y Permisos en el Host:**
-> 1. **Evitar el error de creación de Carpetas**: Si los archivos `history.db` o `knowledge_base.json` no existen en tu host al arrancar el contenedor, **Docker los creará como directorios**, bloqueando la ejecución con el error `unable to start container process... not a directory`.
->    * Resuélvelo ejecutando esto en la consola de tu servidor antes de iniciar el contenedor:
->      ```bash
->      rm -rf /home/leif/docker/configs/ai-devops-bot/history.db
->      touch /home/leif/docker/configs/ai-devops-bot/history.db
->      ```
-> 2. **Resolver el error SQLite "Unable to open database file"**: Debido a que el bot corre de forma segura bajo el usuario no root `appuser` (UID `10001`) dentro del contenedor, necesita permisos completos sobre estos archivos montados. Configura los permisos correctos ejecutando:
+> **Solución de Problemas de Permisos en el Host:**
+> 1. **Resolver el error SQLite "Unable to open database file"**: Debido a que el bot corre de forma segura bajo el usuario no root `appuser` (UID `10001`) dentro del contenedor, necesita permisos completos sobre el directorio montado. Configura los permisos correctos ejecutando:
 >    ```bash
->    chmod 666 /home/leif/docker/configs/ai-devops-bot/history.db
+>    mkdir -p /home/leif/docker/configs/ai-devops-bot/data
+>    chmod -R 777 /home/leif/docker/configs/ai-devops-bot/data
 >    ```
 
 #### Paso 4: Dejar que Watchtower trabaje
