@@ -46,7 +46,7 @@ graph TD
 
 *   **Asynchronous Web Control Center (Web UI)**: A premium, dark-themed, glassmorphic dashboard served natively on `HEALTHCHECK_PORT` (default `8000`) with zero external Python dependencies.
 *   **Full-Detail Incident Explorer**: View untruncated raw error log streams from Grafana Loki along with the AI's diagnostic proposal (complete with one-click code copy buttons) in a gorgeous side-by-side split screen view, without any size limitations.
-*   **Interactive RAG Knowledge Base Editor**: A fully interactive Web UI to Add, Edit, or Delete custom troubleshooting patterns and resolution commands in the SQLite database with instant real-time reloading.
+*   **Interactive RAG Knowledge Base Editor**: A fully interactive Web UI to Add, Edit, or Delete custom troubleshooting patterns and resolution commands in the SQLite database with instant real-time reloading. Supports advanced **SQL-like boolean rules** (e.g., `("%error out of memory%" and "%container sserr%") or ("%error out of cpu%")`) alongside legacy substring matching.
 *   **Application Versioning**: Automated version tracking on each deployment, displayed programmatically in the UI.
 *   **Incident Management**: Filter incidents by resolved/unresolved status and securely delete historical records from the SQLite database directly from the dashboard.
 *   **SQLite Incident History Persistence**: Uses a local SQLite database (`history.db`) to record log telemetry history across restarts.
@@ -263,7 +263,7 @@ graph TD
 
 *   **Centro de Control Web Asíncrono (Web UI)**: Un panel de control premium con estética oscura y *glassmorphic* servido de forma nativa en `HEALTHCHECK_PORT` (por defecto `8000`) sin dependencias de librerías externas de Python.
 *   **Explorador de Incidentes a Detalle Completo**: Visualiza de forma paralela el flujo de logs de error completo de Loki y el diagnóstico de la IA con formato Markdown enriquecido (con copia en un clic de comandos de consola), sin límite de caracteres.
-*   **Editor Visual del Mapa de Conocimiento**: Modales interactivos para Añadir, Modificar o Eliminar de forma dinámica las reglas del RAG local en la base de datos con recarga automática instantánea en caliente.
+*   **Editor Visual del Mapa de Conocimiento**: Modales interactivos para Añadir, Modificar o Eliminar de forma dinámica las reglas del RAG local en la base de datos con recarga automática instantánea en caliente. Soporta **reglas booleanas avanzadas tipo SQL** (ej. `("%error out of memory%" and "%container sserr%") or ("%error out of cpu%")`) así como búsquedas clásicas de texto.
 *   **Versionado de Aplicación Automático**: Seguimiento automático de la versión en cada despliegue con visualización programática en la UI.
 *   **Gestión de Incidentes**: Filtra los incidentes por estado (resuelto/no resuelto) y permite eliminar registros históricos del SQLite directamente desde el panel.
 *   **Persistencia Histórica de Incidentes en SQLite**: Utiliza una base de datos local SQLite (`history.db`) para almacenar todo el historial de alertas detectadas de forma permanente.
