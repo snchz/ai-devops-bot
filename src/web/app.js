@@ -83,6 +83,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const settingsForm = document.getElementById("settings-form");
     const fieldPollInterval = document.getElementById("field-poll-interval");
     const fieldPattern = document.getElementById("field-pattern");
+    const fieldIsRegex = document.getElementById("field-is-regex");
     const fieldDescription = document.getElementById("field-description");
     const fieldCause = document.getElementById("field-cause");
     const fieldSolution = document.getElementById("field-solution");
@@ -679,9 +680,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 ? `<div class="kb-card-field code-block"><span class="label">Comando de Autocuración:</span><pre><code>${rule.commands}</code></pre></div>` 
                 : "";
 
+            const regexBadge = rule.is_regex 
+                ? '<span class="kb-badge-tag" style="background-color: rgba(139, 92, 246, 0.15); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.3); font-size: 10px; margin-left: 8px; border-radius: 4px; padding: 2px 6px;">REGEX</span>'
+                : '';
+
             card.innerHTML = `
                 <div class="kb-card-header">
-                    <span class="kb-card-title">${rule.pattern}</span>
+                    <div style="display:flex; align-items:center;">
+                        <span class="kb-card-title">${rule.pattern}</span>
+                        ${regexBadge}
+                    </div>
                     <div class="kb-card-actions">
                         <button class="btn-icon btn-edit-rule" title="Editar regla"><i data-lucide="edit-3"></i></button>
                         <button class="btn-icon delete btn-delete-rule" title="Eliminar regla"><i data-lucide="trash-2"></i></button>
@@ -721,6 +729,7 @@ document.addEventListener("DOMContentLoaded", () => {
             modalTitle.textContent = "Editar Regla de Conocimiento";
             fieldOriginalPattern.value = rule.pattern;
             fieldPattern.value = rule.pattern;
+            fieldIsRegex.checked = !!rule.is_regex;
             fieldDescription.value = rule.description || "";
             fieldCause.value = rule.cause || "";
             fieldSolution.value = rule.solution || "";
@@ -730,6 +739,8 @@ document.addEventListener("DOMContentLoaded", () => {
             // New Mode
             modalTitle.textContent = "Añadir Regla de Conocimiento";
             fieldOriginalPattern.value = "";
+            fieldPattern.value = "";
+            fieldIsRegex.checked = false;
             fieldAction.value = "ALERT";
         }
         
@@ -749,6 +760,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const payload = {
             original_pattern: fieldOriginalPattern.value.trim(),
             pattern: fieldPattern.value.trim(),
+            is_regex: fieldIsRegex.checked,
             description: fieldDescription.value.trim(),
             cause: fieldCause.value.trim(),
             solution: fieldSolution.value.trim(),

@@ -12,18 +12,25 @@ class KnowledgeBase:
         """Loads and returns troubleshooting rules from SQLite in real-time."""
         return self.db.get_kb_rules()
         
-    def evaluate_pattern(self, pattern: str, message: str) -> bool:
+    def evaluate_pattern(self, pattern: str, message: str, is_regex: bool = False) -> bool:
         """
         Evaluates a rule pattern against a log message.
-        Supports both legacy substring matches and SQL-like boolean expressions.
+        Supports both legacy substring matches, SQL-like boolean expressions, and regex.
         Example of SQL-like: ("%error out of memory%" and "%container sserr%") or ("%error out of cpu%")
         """
+        msg_lower = message.lower()
+
+        if is_regex:
+            try:
+                return bool(re.search(pattern, msg_lower))
+            except re.error as e:
+                logger.error(f"Error compilando regex '{pattern}': {e}")
+                return False
+
         if '"' not in pattern and "'" not in pattern:
             # Fallback to legacy substring match
-            return pattern.lower() in message.lower()
+            return pattern.lower() in msg_lower
             
-        msg_lower = message.lower()
-        
         def eval_literal(match):
             val = match.group(1).lower()
             # Convert SQL LIKE wildcards to regex
@@ -71,8 +78,9 @@ class KnowledgeBase:
                 pattern = rule.get("pattern", "")
                 if not pattern:
                     continue
+                is_regex = bool(rule.get("is_regex", False))
                 # Use the new evaluation function
-                if pattern not in matched_patterns and self.evaluate_pattern(pattern, log["message"]):
+                if pattern not in matched_patterns and self.evaluate_pattern(pattern, log["message"], is_regex):
                     matched_rules.append(rule)
                     matched_patterns.add(pattern)
                     logger.info(f"💡 [CONOCIMIENTO ENCONTRADO] El log coincide con el patrón: '{rule['pattern']}'")

@@ -406,6 +406,12 @@
                     <span class="form-help">Si este patrón de texto exacto se encuentra en los logs de error, se aplicará esta regla.</span>
                 </div>
 
+                <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="field-is-regex" style="cursor: pointer;">
+                    <label for="field-is-regex" style="cursor: pointer; margin-bottom: 0;">Es Expresión Regular (Regex)</label>
+                    <span class="form-help" style="margin-top: 0; margin-left: auto;">Activa esta opción para usar regex (ej. <code>^error.*db$</code>) en vez de coincidencia estática.</span>
+                </div>
+
                 <div class="form-group">
                     <label for="field-description">Descripción de la Falla</label>
                     <input type="text" id="field-description" placeholder="Ej: Error en la sincronización de Jellyfin con Seerr">

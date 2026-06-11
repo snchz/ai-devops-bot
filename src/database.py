@@ -88,6 +88,12 @@ class Database:
                     logger.info("⚙️ Migrando tabla kb_rules para incluir columna 'action'...")
                     cursor.execute("ALTER TABLE kb_rules ADD COLUMN action TEXT DEFAULT 'ALERT'")
                     conn.commit()
+                    
+                # Check for is_regex column migration in kb_rules
+                if columns_kb and "is_regex" not in columns_kb:
+                    logger.info("⚙️ Migrando tabla kb_rules para incluir columna 'is_regex'...")
+                    cursor.execute("ALTER TABLE kb_rules ADD COLUMN is_regex INTEGER DEFAULT 0")
+                    conn.commit()
                 
                 # Create settings table
                 cursor.execute("""
@@ -577,7 +583,7 @@ class Database:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 # Use PRAGMA to check if action column exists safely, but we added migration in init_db
-                cursor.execute("SELECT id, pattern, description, cause, solution, commands, action FROM kb_rules ORDER BY id DESC")
+                cursor.execute("SELECT id, pattern, description, cause, solution, commands, action, is_regex FROM kb_rules ORDER BY id DESC")
                 rows = cursor.fetchall()
                 
                 rules = []
@@ -589,14 +595,15 @@ class Database:
                         "cause": row["cause"] or "",
                         "solution": row["solution"],
                         "commands": row["commands"] or "",
-                        "action": row["action"] if "action" in row.keys() else "ALERT"
+                        "action": row["action"] if "action" in row.keys() else "ALERT",
+                        "is_regex": bool(row["is_regex"]) if "is_regex" in row.keys() else False
                     })
                 return rules
         except Exception as e:
             logger.error(f"❌ Error al obtener reglas de conocimiento desde SQLite: {e}", exc_info=True)
             return []
 
-    def save_kb_rule(self, pattern: str, description: str, cause: str, solution: str, commands: str, action: str = "ALERT", original_pattern: Optional[str] = None) -> bool:
+    def save_kb_rule(self, pattern: str, description: str, cause: str, solution: str, commands: str, action: str = "ALERT", original_pattern: Optional[str] = None, is_regex: bool = False) -> bool:
         """Saves (inserts or updates) a Knowledge Base rule in SQLite."""
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -618,15 +625,16 @@ class Database:
                             cause = ?,
                             solution = ?,
                             commands = ?,
-                            action = ?
+                            action = ?,
+                            is_regex = ?
                         WHERE id = ?
-                    """, (pattern, description, cause, solution, commands, action, rule_id))
+                    """, (pattern, description, cause, solution, commands, action, int(is_regex), rule_id))
                 else:
                     # Insert
                     cursor.execute("""
-                        INSERT INTO kb_rules (pattern, description, cause, solution, commands, action)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (pattern, description, cause, solution, commands, action))
+                        INSERT INTO kb_rules (pattern, description, cause, solution, commands, action, is_regex)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (pattern, description, cause, solution, commands, action, int(is_regex)))
                 conn.commit()
             return True
         except Exception as e:

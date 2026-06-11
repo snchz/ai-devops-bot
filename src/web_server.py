@@ -304,6 +304,7 @@ class WebServer:
                 commands = payload.get("commands", "").strip()
                 action = payload.get("action", "ALERT").strip().upper()
                 original_pattern = payload.get("original_pattern", "").strip()
+                is_regex = bool(payload.get("is_regex", False))
                 
                 if not pattern or not solution:
                     resp_body = b'{"error": "pattern and solution are required"}'
@@ -311,7 +312,7 @@ class WebServer:
                     await writer.drain()
                     return
                     
-                success = await asyncio.to_thread(self.db.save_kb_rule, pattern, description, cause, solution, commands, action, original_pattern)
+                success = await asyncio.to_thread(self.db.save_kb_rule, pattern, description, cause, solution, commands, action, original_pattern, is_regex)
                 if success:
                     resp_body = b'{"success": true}'
                     writer.write(self._make_response(200, "OK", "application/json", resp_body))
