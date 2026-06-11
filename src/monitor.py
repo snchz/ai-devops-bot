@@ -1,4 +1,5 @@
 import re
+import json
 import time
 import asyncio
 from datetime import datetime, timezone
@@ -29,33 +30,49 @@ class LogMonitor:
         Determines if a log item has an informational/debug/trace level and should be ignored,
         even if it matched the LOKI_QUERY (e.g. contains 'Error' in another context like 'Error: <nil>').
         """
-        message = log.get("message", "")
+        message = log.get("message", "").strip()
         labels = log.get("labels", {})
+
+        info_levels = {"info", "debug", "trace", "informational"}
+        error_levels = {"error", "warn", "warning", "fatal", "panic", "crit", "critical", "emerg", "emergency"}
 
         # 1. Check labels for level/severity/loglevel
         for k, v in labels.items():
             if k.lower() in ("level", "severity", "loglevel"):
-                if v.lower() in ("info", "debug", "trace", "informational"):
+                v_lower = str(v).lower()
+                if v_lower in info_levels:
+                    return True
+                if v_lower in error_levels:
+                    return False
+
+        # 2. Try JSON parsing
+        try:
+            parsed_json = json.loads(message)
+            if isinstance(parsed_json, dict):
+                for key in ("level", "severity", "loglevel"):
+                    if key in parsed_json:
+                        val = str(parsed_json[key]).lower()
+                        if val in error_levels:
+                            return False
+                        if val in info_levels:
+                            return True
+        except json.JSONDecodeError:
+            pass
+
+        # 3. Try logfmt parsing (heuristic structure)
+        # Extract all key=value pairs into a dictionary
+        logfmt_pattern = r'([a-zA-Z0-9_.-]+)=((?:[^\s"\']+)|\"[^\"]*\"|\'[^\']*\')'
+        logfmt_matches = dict(re.findall(logfmt_pattern, message))
+        
+        for key in ("level", "severity", "loglevel"):
+            if key in logfmt_matches:
+                val = logfmt_matches[key].strip("'\"").lower()
+                if val in error_levels:
+                    return False
+                if val in info_levels:
                     return True
 
-        # 2. Check message content for explicit level indicators
-        # Logfmt style: level=info, level="info", severity=info, loglevel=info
-        logfmt_pattern = r'\b(level|severity|loglevel)\s*=\s*[\'"]?(info|debug|trace|informational)[\'"]?\b'
-        if re.search(logfmt_pattern, message, re.IGNORECASE):
-            # To avoid dropping an error that was nested in an info log,
-            # check if there's also an explicit level=error/warn in the message.
-            has_error_level = re.search(r'\b(level|severity|loglevel)\s*=\s*[\'"]?(error|warn|warning|fatal|panic|crit|critical|emerg|emergency)[\'"]?\b', message, re.IGNORECASE)
-            has_bracket_error = re.search(r'\[(error|warn|warning|fatal|panic|crit|critical|emerg|emergency)\]', message, re.IGNORECASE)
-            if not (has_error_level or has_bracket_error):
-                return True
-
-        # JSON style: "level": "info", "severity": "info"
-        json_pattern = r'"(level|severity|loglevel)"\s*:\s*[\'"]?(info|debug|trace|informational)[\'"]?'
-        if re.search(json_pattern, message, re.IGNORECASE):
-            has_error_json = re.search(r'"(level|severity|loglevel)"\s*:\s*[\'"]?(error|warn|warning|fatal|panic|crit|critical|emerg|emergency)[\'"]?', message, re.IGNORECASE)
-            if not has_error_json:
-                return True
-
+        # 4. Fallback to older Regex-based checks for unstructured formats
         # Bracket style: [INFO], [DEBUG], [TRACE]
         bracket_pattern = r'\[(info|debug|trace|informational)\]'
         if re.search(bracket_pattern, message, re.IGNORECASE):
