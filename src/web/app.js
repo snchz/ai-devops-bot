@@ -494,21 +494,58 @@ document.addEventListener("DOMContentLoaded", () => {
             if (logs.length === 0) {
                 contextLogsContainer.innerHTML = `<div style="text-align:center; padding:15px; color:var(--text-muted);">No se encontraron logs en la ventana de tiempo.</div>`;
             } else {
+                const currentIncident = incidents.find(i => i.id === currentIncidentId);
+                const triggerMessages = [];
+                if (currentIncident && currentIncident.logs) {
+                    for (const appLogs of Object.values(currentIncident.logs)) {
+                        if (Array.isArray(appLogs)) {
+                            appLogs.forEach(item => {
+                                if (item && item.message) {
+                                    triggerMessages.push(item.message.trim());
+                                }
+                            });
+                        }
+                    }
+                }
+
                 const logsHtml = logs.map(log => {
-                    // Try to highlight the actual error based on the original log
-                    const isError = log.message.toLowerCase().includes("error") || log.message.toLowerCase().includes("exception");
-                    const style = isError ? "color: #ef4444;" : "";
-                    return `<div class="log-item-line" style="${style}"><code><span style="color:#6b7280; font-size:10px; margin-right:8px;">${log.datetime}</span>${log.message}</code></div>`;
+                    const cleanMsg = log.message.trim();
+                    const isTriggerError = triggerMessages.some(msg => {
+                        const msgLines = msg.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+                        return msgLines.some(line => cleanMsg.includes(line) || line.includes(cleanMsg));
+                    });
+                    
+                    const isError = isTriggerError || log.message.toLowerCase().includes("error") || log.message.toLowerCase().includes("exception");
+                    
+                    let style = "";
+                    let className = "log-item-line";
+                    if (isTriggerError) {
+                        style = "background-color: rgba(239, 68, 68, 0.15); border-left: 3px solid #ef4444; font-weight: 500; padding-left: 8px;";
+                        className += " trigger-error-log";
+                    } else if (isError) {
+                        style = "color: #ef4444;";
+                    }
+                    
+                    return `<div class="${className}" style="${style}"><code><span style="color:#6b7280; font-size:10px; margin-right:8px;">${log.datetime}</span>${log.message}</code></div>`;
                 }).join("");
                 
                 contextLogsContainer.innerHTML = `
                     <div class="log-app-name" style="margin-bottom:8px;"><i data-lucide="align-justify" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:4px;"></i> Contexto Completo (±5 mins)</div>
-                    <div class="log-items-list" style="max-height: 400px; overflow-y: auto;">${logsHtml}</div>
+                    <div class="log-items-list" style="max-height: 400px; overflow-y: auto; scroll-behavior: smooth;">${logsHtml}</div>
                 `;
             }
             
             contextLogsContainer.classList.remove("hide");
             lucide.createIcons();
+            
+            // Auto-scroll to the triggering error line within the scrollable log-items-list
+            const triggerEl = contextLogsContainer.querySelector(".trigger-error-log");
+            if (triggerEl) {
+                // We want to scroll the trigger element into view relative to its parent container .log-items-list
+                setTimeout(() => {
+                    triggerEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                }, 100);
+            }
             
         } catch (err) {
             console.error(err);

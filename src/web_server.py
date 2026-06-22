@@ -183,8 +183,25 @@ class WebServer:
                     writer.write(self._make_response(404, "Not Found", "application/json", resp_body))
                 else:
                     app_name = incident["apps"][0] if incident["apps"] else ""
-                    # We use the created_at timestamp for context, converting to nanoseconds
-                    target_ts_ns = int(incident["created_at"]) * 1_000_000_000
+                    # Try to extract the actual timestamp of the log event from the stored logs dictionary
+                    target_ts_ns = None
+                    if isinstance(incident.get("logs"), dict):
+                        # Try first with the main app name
+                        if app_name and app_name in incident["logs"]:
+                            app_logs = incident["logs"][app_name]
+                            if isinstance(app_logs, list) and len(app_logs) > 0 and isinstance(app_logs[0], dict):
+                                target_ts_ns = app_logs[0].get("timestamp_ns")
+                        # Fallback to any app log timestamp in the dictionary
+                        if target_ts_ns is None:
+                            for logs_list in incident["logs"].values():
+                                if isinstance(logs_list, list) and len(logs_list) > 0 and isinstance(logs_list[0], dict):
+                                    target_ts_ns = logs_list[0].get("timestamp_ns")
+                                    if target_ts_ns is not None:
+                                        break
+                    
+                    if target_ts_ns is None:
+                        # Fallback to created_at timestamp
+                        target_ts_ns = int(incident["created_at"]) * 1_000_000_000
                     
                     logs = await self.loki.fetch_context_logs(app_name, target_ts_ns, window_minutes=5)
                     resp_body = json.dumps(logs, ensure_ascii=False).encode("utf-8")
