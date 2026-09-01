@@ -5,6 +5,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from src.config import Config
+from src.docker_client import DockerClient
 from src.loki import LokiClient
 from src.knowledge_base import KnowledgeBase
 from src.gemini import GeminiClient
@@ -13,30 +14,34 @@ from src.web_server import WebServer
 from src.logger import logger, METRICS
 
 class LogMonitor:
-    """Orchestrator to poll Loki, process logs, and get suggestions asynchronously."""
+    """Orchestrator to poll Docker/Loki, process logs, and get AI suggestions asynchronously."""
     
     def __init__(self, config: Config):
         self.config = config
-        self.loki = LokiClient(config)
-        self.gemini = GeminiClient(config)
         self.db = Database(config.db_path)
         self.kb = KnowledgeBase(self.db)
+        self.gemini = GeminiClient(config)
+        
+        # Select log ingestion client based on configuration
+        if config.log_source == "docker":
+            self.log_client = DockerClient(config)
+            logger.info("📡 Modo de ingestión de logs: Conexión directa a Docker Socket.")
+        else:
+            self.log_client = LokiClient(config)
+            logger.info("📡 Modo de ingestión de logs: Grafana Loki HTTP API.")
+            
         self.last_processed_timestamp_ns: Optional[int] = None
         self.sent_alerts = {}  # In-memory mapping of alert_key -> timestamp
 
-
     def _is_ignored_level(self, log: Dict[str, Any]) -> bool:
-        """
-        Determines if a log item has an informational/debug/trace level and should be ignored,
-        even if it matched the LOKI_QUERY (e.g. contains 'Error' in another context like 'Error: <nil>').
-        """
+        """Determines if a log item has an informational/debug level and should be ignored."""
         message = log.get("message", "").strip()
         labels = log.get("labels", {})
 
         info_levels = {"info", "debug", "trace", "informational"}
         error_levels = {"error", "warn", "warning", "fatal", "panic", "crit", "critical", "emerg", "emergency"}
 
-        # 1. Check labels for level/severity/loglevel
+        # 1. Check labels
         for k, v in labels.items():
             if k.lower() in ("level", "severity", "loglevel"):
                 v_lower = str(v).lower()
@@ -59,11 +64,9 @@ class LogMonitor:
         except json.JSONDecodeError:
             pass
 
-        # 3. Try logfmt parsing (heuristic structure)
-        # Extract all key=value pairs into a dictionary
+        # 3. Logfmt parsing
         logfmt_pattern = r'([a-zA-Z0-9_.-]+)=((?:[^\s"\']+)|\"[^\"]*\"|\'[^\']*\')'
         logfmt_matches = dict(re.findall(logfmt_pattern, message))
-        
         for key in ("level", "severity", "loglevel"):
             if key in logfmt_matches:
                 val = logfmt_matches[key].strip("'\"").lower()
@@ -72,15 +75,14 @@ class LogMonitor:
                 if val in info_levels:
                     return True
 
-        # 4. Fallback to older Regex-based checks for unstructured formats
-        # Bracket style: [INFO], [DEBUG], [TRACE]
+        # 4. Bracket style: [INFO], [DEBUG]
         bracket_pattern = r'\[(info|debug|trace|informational)\]'
         if re.search(bracket_pattern, message, re.IGNORECASE):
             has_error_bracket = re.search(r'\[(error|warn|warning|fatal|panic|crit|critical|emerg|emergency)\]', message, re.IGNORECASE)
             if not has_error_bracket:
                 return True
 
-        # Standard prefix/colon style: INFO: or DEBUG: or TRACE:
+        # 5. Standard prefix style: INFO: or DEBUG:
         prefix_pattern = r'\b(info|debug|trace)\s*:\s+'
         if re.search(prefix_pattern, message, re.IGNORECASE):
             has_error_prefix = re.search(r'\b(error|warn|warning|fatal|panic|crit|critical)\s*:\s+', message, re.IGNORECASE)
@@ -90,91 +92,70 @@ class LogMonitor:
         return False
 
     async def establish_baseline(self):
-        """Queries Loki for the last 5 minutes to find the most recent log timestamp to avoid historical spam."""
+        """Initializes the baseline timestamp to the current time to avoid historical spam."""
         logger.info("Estableciendo línea base de logs para evitar falsos positivos históricos...")
+        lookback_ns = 2 * 60 * 1_000_000_000  # 2 minutes lookback
+        start_time_ns = time.time_ns() - lookback_ns
         
-        lookback_ns = 5 * 60 * 1_000_000_000
-        start_time_ns = (time.time_ns()) - lookback_ns
-        
-        logs = await self.loki.fetch_logs(start_ns=start_time_ns, limit=1000)
-        
-        if logs:
-            max_ts = max(log["timestamp_ns"] for log in logs)
-            self.last_processed_timestamp_ns = max_ts
-            dt_str = datetime.fromtimestamp(max_ts / 1_000_000_000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            logger.info(f"Línea base establecida. Ignorando logs anteriores a: {dt_str} (TS: {max_ts})")
-        else:
+        try:
+            logs = await self.log_client.fetch_logs(start_ns=start_time_ns, limit=200)
+            if logs:
+                max_ts = max(log["timestamp_ns"] for log in logs)
+                self.last_processed_timestamp_ns = max_ts
+                dt_str = datetime.fromtimestamp(max_ts / 1_000_000_000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                logger.info(f"Línea base establecida. Ignorando logs anteriores a: {dt_str}")
+            else:
+                self.last_processed_timestamp_ns = time.time_ns()
+                logger.info(f"No se encontraron logs recientes. Línea base fijada al tiempo actual.")
+        except Exception as e:
+            logger.error(f"Error al establecer línea base: {e}")
             self.last_processed_timestamp_ns = time.time_ns()
-            logger.info(f"No se encontraron logs recientes. Línea base fijada al tiempo actual del sistema: {self.last_processed_timestamp_ns}")
 
     def group_and_deduplicate(self, logs: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Groups retrieved raw log items by container or job name.
-        Combines logs that occur within 2 seconds of each other into a single block
-        (useful for tracebacks), and counts exact duplications.
-        """
+        """Groups logs by container and combines identical messages."""
         grouped = {}
         for log in logs:
-            # Group by container_name first (standard for docker driver), fallback to job name
             app = log["labels"].get("container_name", log["labels"].get("job", "sistema"))
-            
             if app not in grouped:
                 grouped[app] = []
                 
             msg = log["message"]
             log_time = log.get("timestamp_ns", 0)
             
-            # Check for exact duplicate in current list
             found_exact = False
             for item in grouped[app]:
                 if item["message"] == msg:
                     item["count"] += 1
-                    item["datetime"] = log["datetime"]  # Update to latest datetime seen
+                    item["datetime"] = log["datetime"]
                     item["timestamp_ns"] = max(item.get("timestamp_ns", 0), log_time)
                     found_exact = True
                     break
                     
             if not found_exact:
-                # Check for time proximity (within 2 seconds) to group into an existing block
-                added_to_block = False
-                for item in grouped[app]:
-                    if abs(item.get("timestamp_ns", 0) - log_time) <= 2_000_000_000:
-                        # Append the new message line to the existing block
-                        item["message"] += "\n" + msg
-                        # Update the block's time to the latest log's time
-                        item["datetime"] = log["datetime"]
-                        item["timestamp_ns"] = max(item.get("timestamp_ns", 0), log_time)
-                        added_to_block = True
-                        break
-                        
-                if not added_to_block:
-                    grouped[app].append({
-                        "message": msg,
-                        "datetime": log["datetime"],
-                        "timestamp_ns": log_time,
-                        "count": 1,
-                        "labels": log["labels"]
-                    })
+                grouped[app].append({
+                    "message": msg,
+                    "datetime": log["datetime"],
+                    "timestamp_ns": log_time,
+                    "count": 1,
+                    "labels": log["labels"]
+                })
         return grouped
 
     async def run_poll_cycle(self):
         """Runs a single polling and processing cycle asynchronously."""
-        logger.info("Iniciando ciclo de sondeo en Grafana Loki...")
+        logger.info(f"Iniciando ciclo de sondeo de logs...")
         METRICS["cycles"] += 1
         
-        # 0. Perform auto-closure check for inactive open/resolved incidents (older than 1 week)
+        # Auto-closure and auto-purge check for inactive incidents
         await asyncio.to_thread(self.db.auto_close_inactive_incidents)
         
-        safety_window_ns = 2 * 60 * 1_000_000_000
-        query_start_ns = self.last_processed_timestamp_ns - safety_window_ns
-        
-        fetched_logs = await self.loki.fetch_logs(start_ns=query_start_ns)
+        query_start_ns = self.last_processed_timestamp_ns or (time.time_ns() - 60 * 1_000_000_000)
+        fetched_logs = await self.log_client.fetch_logs(start_ns=query_start_ns)
         
         total_fetched = len(fetched_logs) if fetched_logs else 0
-        logger.info(f"Sondeo de Loki completado. Logs recuperados en el búfer temporal: {total_fetched}")
+        logger.info(f"Sondeo completado. Logs recuperados en el búfer temporal: {total_fetched}")
         
         if not fetched_logs:
-            logger.info("No se recibieron logs de Loki en este ciclo.")
             return
 
         new_logs = []
@@ -182,7 +163,6 @@ class LogMonitor:
             if log["timestamp_ns"] <= self.last_processed_timestamp_ns:
                 continue
             if self._is_ignored_level(log):
-                logger.debug(f"Ignorando log informativo/debug: {log['message'][:80]}")
                 continue
             new_logs.append(log)
         
@@ -196,7 +176,7 @@ class LogMonitor:
         # 1. Group and deduplicate in memory
         grouped_logs = self.group_and_deduplicate(new_logs)
         
-        # 2. Filter out logs under cooldown to prevent alert fatigue
+        # 2. Filter out logs under cooldown
         now = time.time()
         filtered_grouped_logs = {}
         skipped_count = 0
@@ -204,17 +184,15 @@ class LogMonitor:
         for app, items in grouped_logs.items():
             filtered_items = []
             for item in items:
-                # Snippet of message to identify log type without variable stamps
                 msg_snippet = item["message"][:80].strip()
                 cooldown_key = f"{app}:{msg_snippet}"
                 
                 last_sent = self.sent_alerts.get(cooldown_key, 0.0)
                 if now - last_sent < self.config.cooldown_seconds:
                     skipped_count += item["count"]
-                    logger.info(f"🔕 [Cooldown] Alerta omitida para {app}: '{msg_snippet[:50]}...' (En periodo de enfriamiento).")
+                    logger.info(f"🔕 [Cooldown] Alerta omitida para {app}: '{msg_snippet[:40]}...' (En enfriamiento).")
                     continue
                 
-                # Register send timestamp and append
                 self.sent_alerts[cooldown_key] = now
                 filtered_items.append(item)
                 
@@ -230,11 +208,7 @@ class LogMonitor:
             self.last_processed_timestamp_ns = max_ts
             return
             
-        if skipped_count > 0:
-            logger.info(f"Silenciadas {skipped_count} repeticiones de error en este ciclo por políticas de fatiga de alertas.")
-            
-        # Compile a flat list of unique items for Knowledge Base matching
-        # 3. Match unique logs with local RAG Knowledge Base rules per item
+        # 3. Match unique logs with local Knowledge Base rules
         logs_for_ai = {}
         ignored_logs_to_save = []
         matched_rules_for_ai = []
@@ -264,11 +238,7 @@ class LogMonitor:
                         if r not in matched_rules_for_ai:
                             matched_rules_for_ai.append(r)
                             
-        # Log if we are skipping some
-        if ignored_logs_to_save:
-            logger.info(f"🔇 Omitiendo análisis de IA para {len(ignored_logs_to_save)} logs silenciados por Reglas de Conocimiento (Acción: IGNORE).")
-        
-        # 4. Analyze logs in batch, injecting custom solutions if rules were matched
+        # 4. Analyze logs with AI
         analysis = None
         if logs_for_ai:
             try:
@@ -278,32 +248,26 @@ class LogMonitor:
                 analysis = None
             
             if not analysis:
-                logger.warning("No se pudo obtener el análisis de la IA. Registrando incidente con propuesta de fallback.")
                 analysis = (
                     "⚠️ **[ERROR DE PROVEEDOR DE IA]**\n\n"
-                    "El bot no pudo obtener un diagnóstico automatizado del proveedor de Inteligencia Artificial seleccionado "
-                    "(verifica tu `AI_PROVIDER` y `API_KEY` en la configuración del archivo `.env`).\n\n"
-                    "Puedes consultar el detalle del error en los logs originales del contenedor mostrados arriba."
+                    "El bot no pudo obtener un diagnóstico automatizado de la IA.\n"
+                    "Verifica tu `AI_PROVIDER` y `API_KEY` en la configuración."
                 )
             else:
                 METRICS["alerts_sent"] += 1
             
-        # Save incident to database
-        # 5a. Save AI processed logs
+        # 5. Save incidents to database
         for app, items in logs_for_ai.items():
             for item in items:
-                # We pass matched_rules_for_ai (or recalculate per item, but the current db takes the list)
                 await asyncio.to_thread(self.db.register_or_recur_incident, app, item, matched_rules_for_ai, analysis)
                 
-        # 5b. Save ignored logs
         for app, item, item_rules in ignored_logs_to_save:
-            ignore_analysis = "🔇 **[AUTO-RESUELTO]**\n\nEl sistema ha silenciado y auto-resuelto esta incidencia automáticamente porque coincide con una Regla de Conocimiento (Acción: Ignorar)."
+            ignore_analysis = "🔇 **[AUTO-RESUELTO]**\n\nIncidencia silenciada automáticamente por Regla de Conocimiento (Acción: Ignorar)."
             await asyncio.to_thread(self.db.register_or_recur_incident, app, item, item_rules, ignore_analysis)
             
-        # Update last processed timestamp to the latest log seen
         max_ts = max(log["timestamp_ns"] for log in new_logs)
         self.last_processed_timestamp_ns = max_ts
-        logger.info(f"Ciclo completado. Último timestamp actualizado a: {max_ts}")
+        logger.info(f"Ciclo completado. Último timestamp: {max_ts}")
 
     async def polling_loop(self):
         """Infinite polling cycle task."""
@@ -311,14 +275,9 @@ class LogMonitor:
             try:
                 await self.run_poll_cycle()
             except Exception as e:
-                logger.error(f"Excepción crítica no controlada en el ciclo de monitoreo: {e}", exc_info=True)
+                logger.error(f"Excepción en ciclo de monitoreo: {e}", exc_info=True)
                 
-            # Leer el intervalo de revisión (en minutos) desde la base de datos (por defecto 5 min)
-            poll_interval_minutes = await asyncio.to_thread(
-                self.db.get_setting, 
-                "poll_interval_minutes", 
-                "5.0"
-            )
+            poll_interval_minutes = await asyncio.to_thread(self.db.get_setting, "poll_interval_minutes", "5.0")
             try:
                 poll_interval_seconds = int(float(poll_interval_minutes) * 60)
             except ValueError:
@@ -329,20 +288,15 @@ class LogMonitor:
 
     async def start(self):
         """Starts all concurrent background tasks using asyncio."""
-        logger.info(f"Iniciando Bot de Monitoreo de Logs con {self.config.ai_provider}...")
+        logger.info(f"Iniciando Bot de Monitoreo de Logs ({self.config.log_source}) con {self.config.ai_provider}...")
         
-        try:
-            await self.establish_baseline()
-        except Exception as e:
-            logger.error(f"Error crítico al establecer la línea base en el arranque: {e}")
-            self.last_processed_timestamp_ns = time.time_ns()
-            logger.info(f"Fijando timestamp de seguridad al tiempo actual por fallo: {self.last_processed_timestamp_ns}")
+        await self.establish_baseline()
             
         polling_task = asyncio.create_task(self.polling_loop())
         tasks = [polling_task]
         
         if self.config.healthcheck_port:
-            web_server = WebServer(self.config, self.db)
+            web_server = WebServer(self.config, self.db, self.log_client)
             web_task = asyncio.create_task(web_server.start())
             tasks.append(web_task)
             

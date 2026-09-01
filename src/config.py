@@ -9,18 +9,30 @@ class Config:
         # Load environment variables
         load_dotenv()
         
-        # Loki Configuration
+        # Log Ingestion Source: 'docker' (direct container socket) or 'loki' (Grafana Loki)
+        self.log_source = os.getenv("LOG_SOURCE", "docker").lower().strip()
+        
+        # Docker Direct Connection
+        self.docker_socket = os.getenv("DOCKER_SOCKET", "/var/run/docker.sock")
+        self.docker_url = os.getenv("DOCKER_URL", "").rstrip("/")
+        default_ignored = "ai-devops-bot,loki,promtail,dozzle,cadvisor,node-exporter,homepage,dockge-dockge-1"
+        self.ignored_containers = [
+            c.strip() for c in os.getenv("IGNORED_CONTAINERS", default_ignored).split(",") if c.strip()
+        ]
+
+        # Loki Configuration (Optional when LOG_SOURCE=docker)
         self.loki_url = os.getenv("LOKI_URL", "").rstrip("/")
-        if not self.loki_url:
-            raise ValueError("LOKI_URL es obligatorio en la configuración.")
+        if self.log_source == "loki" and not self.loki_url:
+            raise ValueError("LOKI_URL es obligatorio cuando LOG_SOURCE='loki'.")
             
         self.loki_user = os.getenv("LOKI_USER", None)
         self.loki_password = os.getenv("LOKI_PASSWORD", None)
         
-        # Loki Query: default matches errors, fatals, and panics across non-empty jobs
-        # Excludes the bot itself, Loki, and duplicate internal_logs to prevent duplicate logging
-        # Also filters out level=info and level=debug logs to avoid false positives
-        self.loki_query = os.getenv("LOKI_QUERY", r'{job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot" !~ "(?i)level=\"?info\"?\b" !~ "(?i)level=\"?debug\"?\b"')
+        # Loki Query fallback
+        self.loki_query = os.getenv(
+            "LOKI_QUERY",
+            r'{job=~".+", container_name!="ai-devops-bot", container_name!="loki", container_name!="internal_logs", job!="internal_logs"} |~ "(?i)(error|fatal|panic)" !~ "LogAnalyzerBot" !~ "(?i)level=\"?info\"?\b" !~ "(?i)level=\"?debug\"?\b"'
+        )
         
         # Log Format Configuration
         self.log_format = os.getenv("LOG_FORMAT", "TEXT").upper().strip()
@@ -34,7 +46,6 @@ class Config:
         # IA (Groq) Configuration
         self.groq_api_key = os.getenv("GROQ_API_KEY", os.getenv("GEMINI_API_KEY", ""))
         model = os.getenv("GEMINI_MODEL", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
-        # Auto-map Gemini model strings to standard Groq Llama model for seamless migration
         if "gemini" in model or "google/" in model:
             model = "llama-3.3-70b-versatile"
         self.groq_model = model
@@ -52,7 +63,6 @@ class Config:
             raise ValueError("GROQ_API_KEY (o GEMINI_API_KEY) es obligatorio para el proveedor 'groq'.")
         elif self.ai_provider == "gemini" and not self.gemini_api_key:
             raise ValueError("GEMINI_API_KEY (o GROQ_API_KEY) es obligatorio para el proveedor 'gemini'.")
-        
 
         # Alert Fatigue / Cooldown Configuration (Default 15 minutes)
         try:
@@ -73,5 +83,3 @@ class Config:
         db_dir = os.path.dirname(self.db_path)
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
-
-

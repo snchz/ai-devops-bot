@@ -21,6 +21,9 @@ class GeminiClient:
         self.ollama_url = config.ollama_url
         self.ollama_model = config.ollama_model
         
+        # Persistent HTTP client session to prevent connection churn & memory leaks
+        self.client = httpx.AsyncClient(timeout=45.0)
+        
         # System instructions to configure LLM as an expert DevOps/sysadmin
         self.system_instruction = (
             "Actúa como un Ingeniero DevOps y Administrador de Sistemas Linux, Docker y Docker Compose Senior "
@@ -46,22 +49,24 @@ class GeminiClient:
 
     async def analyze_logs(self, grouped_logs: Dict[str, List[Dict[str, Any]]], matched_rules: List[Dict[str, Any]]) -> Optional[str]:
         """Sends grouped logs and custom injected solutions to selected AI provider for analysis."""
-        # Format the log collection into a clean, structured prompt
         prompt_lines = [
             "Se han detectado los siguientes logs de error agrupados por contenedor en el sistema:\n"
         ]
         
         for app, items in grouped_logs.items():
             prompt_lines.append(f"📦 [Contenedor / App: {app}]")
-            for idx, item in enumerate(items, 1):
+            # Limit to top 5 representative errors per container to avoid huge prompt payloads
+            for idx, item in enumerate(items[:5], 1):
+                clean_msg = item['message'].strip()
+                if len(clean_msg) > 500:
+                    clean_msg = clean_msg[:250] + "\n... [TRUNCADO PARA BREVEDAD] ...\n" + clean_msg[-250:]
                 prompt_lines.append(
                     f"  Log #{idx} (ocurrencias en este ciclo: {item['count']}):\n"
                     f"  Fecha: {item['datetime']}\n"
-                    f"  Mensaje original:\n  {item['message']}\n"
+                    f"  Mensaje original:\n  {clean_msg}\n"
                 )
             prompt_lines.append("-" * 30 + "\n")
             
-        # Inject custom knowledge rules if found
         if matched_rules:
             prompt_lines.append(
                 "🚨 [NOTAS DE CONOCIMIENTO PREVIO DEL ADMINISTRADOR - PRIORIDAD MÁXIMA]\n"
@@ -84,7 +89,6 @@ class GeminiClient:
         
         prompt = "\n".join(prompt_lines)
         
-        # Route to the appropriate provider
         if self.ai_provider == "groq":
             return await self._analyze_groq(prompt)
         elif self.ai_provider == "gemini":
@@ -116,8 +120,7 @@ class GeminiClient:
         
         try:
             logger.info(f"Enviando lote de logs a Groq ({self.groq_model}) para su diagnóstico...")
-            async with httpx.AsyncClient(timeout=45) as client:
-                response = await client.post(url, headers=headers, json=payload)
+            response = await self.client.post(url, headers=headers, json=payload)
             
             if response.status_code != 200:
                 logger.error(f"Error devuelto por la API de Groq ({response.status_code}): {response.text}")
@@ -166,8 +169,7 @@ class GeminiClient:
         
         try:
             logger.info(f"Enviando lote de logs a Google Gemini ({self.gemini_model}) para su diagnóstico...")
-            async with httpx.AsyncClient(timeout=45) as client:
-                response = await client.post(url, headers=headers, json=payload)
+            response = await self.client.post(url, headers=headers, json=payload)
                 
             if response.status_code != 200:
                 logger.error(f"Error devuelto por la API de Gemini ({response.status_code}): {response.text}")
@@ -211,8 +213,7 @@ class GeminiClient:
         
         try:
             logger.info(f"Enviando lote de logs a Ollama ({self.ollama_model}) en {self.ollama_url} para su diagnóstico...")
-            async with httpx.AsyncClient(timeout=45) as client:
-                response = await client.post(url, headers=headers, json=payload)
+            response = await self.client.post(url, headers=headers, json=payload)
                 
             if response.status_code != 200:
                 logger.error(f"Error devuelto por la API de Ollama ({response.status_code}): {response.text}")
@@ -233,4 +234,10 @@ class GeminiClient:
         except Exception as e:
             logger.error(f"Excepción inesperada al invocar Ollama: {e}")
             return None
-        
+
+    async def close(self):
+        """Closes the underlying HTTP client session."""
+        try:
+            await self.client.aclose()
+        except Exception:
+            pass

@@ -12,22 +12,30 @@ class Database:
     def __init__(self, db_path: str = "history.db"):
         self.db_path = db_path
 
-        # Ensure parent directory exists when possible. Config may already attempt this,
-        # but in containerized environments a mounted volume can hide permissions/ownership.
         db_dir = os.path.dirname(self.db_path)
         if db_dir:
             try:
                 os.makedirs(db_dir, exist_ok=True)
             except Exception:
-                # If we cannot create the directory here, we'll detect write issues later
                 logger.warning(f"⚠️ No se pudo crear el directorio para la DB: {db_dir}")
 
         self.init_db()
 
+    def _get_connection(self) -> sqlite3.Connection:
+        """Helper to create optimized SQLite connections with optimal PRAGMAs."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        # High performance and low disk-wear PRAGMAs
+        cursor.execute("PRAGMA journal_mode = WAL;")
+        cursor.execute("PRAGMA synchronous = NORMAL;")
+        cursor.execute("PRAGMA cache_size = -2000;")  # 2MB RAM cache limit
+        cursor.execute("PRAGMA temp_store = MEMORY;")
+        cursor.close()
+        return conn
+
     def init_db(self):
         """Initializes database schema if it does not exist, migrating if necessary."""
         try:
-            # Quick writable check: try to create and remove a small temp file in the DB dir.
             db_dir = os.path.dirname(self.db_path) or os.getcwd()
             try:
                 testfile = os.path.join(db_dir, ".db_write_test")
@@ -37,14 +45,13 @@ class Database:
             except Exception:
                 logger.warning(f"⚠️ No se detecta permiso de escritura en '{db_dir}'. Intentando abrir la DB de todas formas...")
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Check if old table exists and needs recreation
+                # Check if old table exists and needs migration
                 cursor.execute("PRAGMA table_info(incidents)")
                 columns = [col[1] for col in cursor.fetchall()]
                 
-                # If table exists but doesn't have Phase 2 columns, drop it to migrate safely
                 if columns and "incident_num" not in columns:
                     logger.warning("⚠️ Detectada estructura de base de datos antigua. Recreando tabla para Fase 2...")
                     cursor.execute("DROP TABLE IF EXISTS incidents")
@@ -64,9 +71,17 @@ class Database:
                         kb_applied TEXT,
                         created_at INTEGER NOT NULL,
                         updated_at INTEGER NOT NULL,
-                        history TEXT NOT NULL DEFAULT '[]'
+                        history TEXT NOT NULL DEFAULT '[]',
+                        occurrences_count INTEGER NOT NULL DEFAULT 1
                     )
                 """)
+                
+                # Add occurrences_count column if migrating from previous schema
+                cursor.execute("PRAGMA table_info(incidents)")
+                cols = [c[1] for c in cursor.fetchall()]
+                if cols and "occurrences_count" not in cols:
+                    cursor.execute("ALTER TABLE incidents ADD COLUMN occurrences_count INTEGER NOT NULL DEFAULT 1")
+                    conn.commit()
                 
                 # Create knowledge base rules table (kb_rules)
                 cursor.execute("""
@@ -77,21 +92,18 @@ class Database:
                         cause TEXT,
                         solution TEXT NOT NULL,
                         commands TEXT,
-                        action TEXT DEFAULT 'ALERT'
+                        action TEXT DEFAULT 'ALERT',
+                        is_regex INTEGER DEFAULT 0
                     )
                 """)
                 
-                # Check for action column migration in kb_rules
                 cursor.execute("PRAGMA table_info(kb_rules)")
                 columns_kb = [col[1] for col in cursor.fetchall()]
                 if columns_kb and "action" not in columns_kb:
-                    logger.info("⚙️ Migrando tabla kb_rules para incluir columna 'action'...")
                     cursor.execute("ALTER TABLE kb_rules ADD COLUMN action TEXT DEFAULT 'ALERT'")
                     conn.commit()
                     
-                # Check for is_regex column migration in kb_rules
                 if columns_kb and "is_regex" not in columns_kb:
-                    logger.info("⚙️ Migrando tabla kb_rules para incluir columna 'is_regex'...")
                     cursor.execute("ALTER TABLE kb_rules ADD COLUMN is_regex INTEGER DEFAULT 0")
                     conn.commit()
                 
@@ -104,256 +116,123 @@ class Database:
                 """)
                 conn.commit()
             
-            # Auto-migrate and consolidate old duplicate incidents on startup
             self._migrate_and_consolidate_signatures()
-            
-            logger.info(f"💾 Base de datos SQLite consolidada inicializada exitosamente en: {self.db_path}")
+            logger.info(f"💾 Base de datos SQLite optimizada (WAL + Cache) inicializada en: {self.db_path}")
         except Exception as e:
-            # If opening the configured DB failed, attempt fallback locations that are
-            # more likely a) writable or b) not a mounted volume with root ownership.
             logger.error(f"❌ Error al inicializar la base de datos SQLite en '{self.db_path}': {e}", exc_info=True)
 
-            fallbacks = [
-                os.path.join(os.getcwd(), "history.db"),
-                os.path.join(os.path.expanduser("~"), ".ai-devops-bot", "history.db"),
-                os.path.join("/tmp", "history.db")
-            ]
-            for fb in fallbacks:
-                try:
-                    fb_dir = os.path.dirname(fb)
-                    if fb_dir:
-                        os.makedirs(fb_dir, exist_ok=True)
-                    with sqlite3.connect(fb) as conn:
-                        conn.execute("PRAGMA user_version")
-                    self.db_path = fb
-                    logger.warning(f"🔁 Se usará la ruta de respaldo para la DB: {self.db_path}")
-                    # Retry initialization with the fallback path
-                    self.init_db()
-                    return
-                except Exception:
-                    continue
-
-            logger.error("❌ No fue posible inicializar ninguna base de datos SQLite. Verifique permisos y montaje de volúmenes.")
-
     def _migrate_and_consolidate_signatures(self):
-        """
-        Migrates existing database records to the new normalized signature format,
-        consolidating/merging duplicates automatically.
-        """
+        """Migrates and compacts large existing histories to avoid excessive RAM/disk usage."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
-                # Fetch all existing incidents
-                cursor.execute("SELECT * FROM incidents")
+                cursor.execute("SELECT id, logs, history, occurrences_count FROM incidents")
                 rows = cursor.fetchall()
                 if not rows:
                     return
                 
-                logger.info(f"⚙️ Iniciando migración y consolidación de {len(rows)} incidencias históricas...")
-                
-                # Group by normalized signature: f"{app}:{fingerprint}"
-                groups = {}
+                needs_update = 0
                 for row in rows:
-                    app = row["apps"]
-                    # Parse logs to extract the original message to run through fingerprinting
+                    hist_raw = row["history"] or "[]"
                     try:
-                        logs_dict = json.loads(row["logs"])
-                        first_msg = ""
-                        for app_name, items in logs_dict.items():
-                            if items:
-                                first_msg = items[0].get("message", "")
-                                break
-                    except Exception:
-                        first_msg = ""
-                        
-                    if not first_msg:
-                        # Fallback to the signature prefix if parsing fails
-                        first_msg = row["error_signature"].split(":", 1)[-1]
-                        
-                    fingerprint = self._get_error_fingerprint(first_msg)
-                    first_app = app.split(",")[0] if "," in app else app
-                    norm_sig = f"{first_app}:{fingerprint}"
-                    
-                    if norm_sig not in groups:
-                        groups[norm_sig] = []
-                    groups[norm_sig].append(row)
-                
-                # Consolidate groups
-                consolidated_count = 0
-                for norm_sig, group in groups.items():
-                    if len(group) == 1:
-                        # Only one incident, just update its signature to the normalized one
-                        row = group[0]
-                        cursor.execute("""
-                            UPDATE incidents
-                            SET error_signature = ?
-                            WHERE id = ?
-                        """, (norm_sig, row["id"]))
-                        continue
-                    
-                    # Duplicate found! We need to merge them.
-                    group.sort(key=lambda r: r["id"]) # Sort by ID (oldest first)
-                    primary = group[0]
-                    duplicates = group[1:]
-                    
-                    primary_history = []
-                    try:
-                        primary_history = json.loads(primary["history"])
+                        hist_list = json.loads(hist_raw)
+                        if isinstance(hist_list, list) and len(hist_list) > 15:
+                            trimmed_hist = hist_list[-15:]
+                            total_count = max(row["occurrences_count"] or 1, len(hist_list))
+                            cursor.execute("""
+                                UPDATE incidents 
+                                SET history = ?, occurrences_count = ?
+                                WHERE id = ?
+                            """, (json.dumps(trimmed_hist, ensure_ascii=False), total_count, row["id"]))
+                            needs_update += 1
                     except Exception:
                         pass
                         
-                    for dup in duplicates:
-                        dup_logs = {}
-                        try:
-                            dup_logs = json.loads(dup["logs"])
-                        except Exception:
-                            pass
-                            
-                        # Add each log item in dup to the history list
-                        for app_name, items in dup_logs.items():
-                            for item in items:
-                                primary_history.append({
-                                    "timestamp": dup["created_at"],
-                                    "datetime": item.get("datetime", ""),
-                                    "message": item.get("message", ""),
-                                    "count": item.get("count", 1)
-                                })
-                                
-                        # Merge the duplicate's own history
-                        try:
-                            dup_hist = json.loads(dup["history"])
-                            if isinstance(dup_hist, list):
-                                primary_history.extend(dup_hist)
-                        except Exception:
-                            pass
-                    
-                    # Sort merged history by timestamp
-                    primary_history.sort(key=lambda h: h.get("timestamp", 0))
-                    
-                    # Determine consolidated status: open if any is open
-                    any_open = primary["status"] == "ABIERTA" or any(d["status"] == "ABIERTA" for d in duplicates)
-                    cons_status = "ABIERTA" if any_open else "RESUELTA"
-                    
-                    cons_created = min(primary["created_at"], min(d["created_at"] for d in duplicates))
-                    cons_updated = max(primary["updated_at"], max(d["updated_at"] for d in duplicates))
-                    
-                    cursor.execute("""
-                        UPDATE incidents
-                        SET error_signature = ?,
-                            status = ?,
-                            created_at = ?,
-                            updated_at = ?,
-                            history = ?
-                        WHERE id = ?
-                    """, (
-                        norm_sig,
-                        cons_status,
-                        cons_created,
-                        cons_updated,
-                        json.dumps(primary_history, ensure_ascii=False),
-                        primary["id"]
-                    ))
-                    
-                    # Delete duplicates
-                    dup_ids = [d["id"] for d in duplicates]
-                    placeholders = ",".join("?" for _ in dup_ids)
-                    cursor.execute(f"DELETE FROM incidents WHERE id IN ({placeholders})", tuple(dup_ids))
-                    consolidated_count += len(duplicates)
-                
-                conn.commit()
-                if consolidated_count > 0:
-                    logger.info(f"✨ Migración de base de datos finalizada: se consolidaron y eliminaron {consolidated_count} incidencias duplicadas.")
-                else:
-                    logger.info("✅ Todos los incidentes históricos ya estaban normalizados y sin duplicados.")
+                if needs_update > 0:
+                    conn.commit()
+                    logger.info(f"🧹 Historiales compactados (tope 15 registros FIFO) en {needs_update} incidencias para ahorrar disco y RAM.")
+                    # Passive checkpoint to clean up WAL
+                    cursor.execute("PRAGMA wal_checkpoint(PASSIVE)")
         except Exception as e:
-            logger.error(f"❌ Error durante la migración y consolidación de firmas: {e}", exc_info=True)
-
+            logger.error(f"❌ Error durante la compactación de firmas: {e}")
 
     def _get_error_fingerprint(self, message: str) -> str:
-        """Generates a normalized fingerprint for the error message, stripping dynamic variables (dates, timestamps, numbers, UUIDs, hex/hashes)."""
+        """Generates a normalized fingerprint for the error message, stripping dynamic variables."""
         sig = message.lower().strip()
         
         # 1. Strip standard ISO/Timestamp dates and times
-        # Matches: YYYY-MM-DD HH:MM:SS, HH:MM:SS.mmm, etc.
         sig = re.sub(r'\d{4}[-/]\d{2}[-/]\d{2}[ tT]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:[zZ]|[+-]\d{2}:?\d{2})?', '<date-time>', sig)
-        
-        # Matches Apache / Common Log style: [02/Jun/2026:10:11:24 +0200]
         sig = re.sub(r'\b\d{2}/[a-z]{3}/\d{4}:\d{2}:\d{2}:\d{2}(?:\s+[+-]\d{4})?\b', '<date-time>', sig)
-        
-        # Matches other custom date styles: DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD
         sig = re.sub(r'\b\d{2}[-/]\d{2}[-/]\d{4}\b', '<date>', sig)
         sig = re.sub(r'\b\d{4}[-/]\d{2}[-/]\d{2}\b', '<date>', sig)
-        
-        # Matches standalone times: HH:MM:SS
         sig = re.sub(r'\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b', '<time>', sig)
         
-        # 2. Strip UUIDs (matches 8-4-4-4-12 hex format)
+        # 2. Strip UUIDs
         sig = re.sub(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', '<uuid>', sig)
         
-        # 3. Strip Hex addresses and dynamic hashes (length >= 8 hex characters)
+        # 3. Strip Hex addresses and dynamic hashes
         sig = re.sub(r'\b0x[0-9a-f]+\b', '<hex>', sig)
         sig = re.sub(r'\b[0-9a-f]{8,}\b', '<hash>', sig)
         
-        # 4. Replace standalone numbers/integers/floats (to group connection ports, IDs, counts)
+        # 4. Replace numbers
         sig = re.sub(r'\b\d+(?:\.\d+)?\b', '<num>', sig)
         
         # 5. Normalize whitespace
         sig = re.sub(r'\s+', ' ', sig).strip()
         
-        # Take first and last 75 chars for long strings to capture both context and actual error
         if len(sig) > 150:
             return sig[:75] + "..." + sig[-75:]
         return sig
 
     def register_or_recur_incident(self, app: str, log_item: Dict[str, Any], matched_rules: List[Dict[str, Any]], ai_proposal: str) -> str:
-        """Registers a new incident or processes a recurrence/reopening of an existing one."""
+        """Registers a new incident or processes a recurrence with bounded history (FIFO capped at 15 items)."""
         current_time = int(time.time())
         msg = log_item.get("message", "")
         fingerprint = self._get_error_fingerprint(msg)
         error_signature = f"{app}:{fingerprint}"
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 
-                # Check if this error signature already exists
                 cursor.execute("""
-                    SELECT id, incident_num, status, logs, history, created_at, updated_at
+                    SELECT id, incident_num, status, history, occurrences_count
                     FROM incidents
                     WHERE error_signature = ?
                 """, (error_signature,))
                 row = cursor.fetchone()
                 
                 if row:
-                    # Recurrence!
                     incident_id = row["id"]
                     incident_num = row["incident_num"]
                     old_status = row["status"]
                     old_history_str = row["history"]
+                    current_count = (row["occurrences_count"] or 1) + log_item.get("count", 1)
                     
                     try:
                         history_list = json.loads(old_history_str)
+                        if not isinstance(history_list, list):
+                            history_list = []
                     except Exception:
                         history_list = []
                         
-                    # Add current occurrence to history
+                    # Add current occurrence and cap at 15 items FIFO
                     history_list.append({
                         "timestamp": current_time,
                         "datetime": log_item.get("datetime", ""),
-                        "message": msg,
+                        "message": msg[:300],  # Truncate to save disk
                         "count": log_item.get("count", 1)
                     })
+                    history_list = history_list[-15:]
                     
-                    # Determine if any rule auto-resolves this incident
                     has_ignore_rule = any(rule.get("action", "ALERT").upper() == "IGNORE" for rule in matched_rules)
                     new_status = "RESUELTA" if has_ignore_rule else "ABIERTA"
                     
                     kb_applied_json = None
                     if has_ignore_rule:
-                        # Grab the first rule that caused the ignore to register it
                         ignore_rule = next((r for r in matched_rules if r.get("action", "ALERT").upper() == "IGNORE"), None)
                         if ignore_rule:
                             kb_applied_json = json.dumps(ignore_rule, ensure_ascii=False)
@@ -366,7 +245,8 @@ class Database:
                             ai_proposal = ?,
                             kb_applied = COALESCE(?, kb_applied),
                             updated_at = ?,
-                            history = ?
+                            history = ?,
+                            occurrences_count = ?
                         WHERE id = ?
                     """, (
                         new_status,
@@ -376,6 +256,7 @@ class Database:
                         kb_applied_json,
                         current_time,
                         json.dumps(history_list, ensure_ascii=False),
+                        current_count,
                         incident_id
                     ))
                     conn.commit()
@@ -383,10 +264,9 @@ class Database:
                     if old_status in ("RESUELTA", "CERRADA"):
                         logger.info(f"🔄 [REAPERTURA] Incidente {incident_num} ({app}) reabierto por recurrencia del error.")
                     else:
-                        logger.info(f"📈 [RECURRENCIA] Incidente {incident_num} ({app}) actualizado con nueva ocurrencia.")
+                        logger.info(f"📈 [RECURRENCIA] Incidente {incident_num} ({app}) actualizado (#{current_count} ocurrencias).")
                     return incident_num
                 else:
-                    # New incident!
                     cursor.execute("SELECT COUNT(*) FROM incidents")
                     total_count = cursor.fetchone()[0]
                     incident_num = f"INC-{total_count + 1:04d}"
@@ -400,10 +280,17 @@ class Database:
                         if ignore_rule:
                             kb_applied_json = json.dumps(ignore_rule, ensure_ascii=False)
                     
+                    initial_history = [{
+                        "timestamp": current_time,
+                        "datetime": log_item.get("datetime", ""),
+                        "message": msg[:300],
+                        "count": log_item.get("count", 1)
+                    }]
+                    
                     cursor.execute("""
                         INSERT INTO incidents (
-                            incident_num, status, apps, error_signature, logs, matched_rules, ai_proposal, kb_applied, created_at, updated_at, history
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            incident_num, status, apps, error_signature, logs, matched_rules, ai_proposal, kb_applied, created_at, updated_at, history, occurrences_count
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         incident_num,
                         initial_status,
@@ -415,7 +302,8 @@ class Database:
                         kb_applied_json,
                         current_time,
                         current_time,
-                        "[]"
+                        json.dumps(initial_history, ensure_ascii=False),
+                        log_item.get("count", 1)
                     ))
                     conn.commit()
                     
@@ -425,17 +313,17 @@ class Database:
                         logger.info(f"🚨 [NUEVO INCIDENTE] Registrado {incident_num} para {app}.")
                     return incident_num
         except Exception as e:
-            logger.error(f"❌ Error al registrar/actualizar incidente en la base de datos: {e}", exc_info=True)
+            logger.error(f"❌ Error al registrar/actualizar incidente en SQLite: {e}", exc_info=True)
             return ""
 
-    def get_incidents(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Retrieves history of incident cycles, ordered by newest first."""
+    def get_incidents(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Retrieves lightweight summaries of incidents for the main UI dashboard to save memory and bandwidth."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, incident_num, status, apps, error_signature, logs, matched_rules, ai_proposal, kb_applied, created_at, updated_at, history
+                    SELECT id, incident_num, status, apps, error_signature, logs, matched_rules, ai_proposal, kb_applied, created_at, updated_at, occurrences_count
                     FROM incidents
                     ORDER BY id DESC
                     LIMIT ?
@@ -450,13 +338,14 @@ class Database:
                         "status": row["status"],
                         "apps": row["apps"].split(",") if row["apps"] else [],
                         "error_signature": row["error_signature"],
-                        "logs": json.loads(row["logs"]),
-                        "matched_rules": json.loads(row["matched_rules"]),
+                        "logs": json.loads(row["logs"]) if row["logs"] else {},
+                        "matched_rules": json.loads(row["matched_rules"]) if row["matched_rules"] else [],
                         "ai_proposal": row["ai_proposal"],
                         "kb_applied": json.loads(row["kb_applied"]) if row["kb_applied"] else None,
                         "created_at": row["created_at"],
                         "updated_at": row["updated_at"],
-                        "history": json.loads(row["history"]) if row["history"] else []
+                        "occurrences_count": row["occurrences_count"] if "occurrences_count" in row.keys() else 1,
+                        "history": [] # Loaded on demand via get_incident()
                     })
                 return incidents
         except Exception as e:
@@ -464,13 +353,13 @@ class Database:
             return []
 
     def get_incident(self, incident_id: int) -> Optional[Dict[str, Any]]:
-        """Retrieves a specific incident by its ID."""
+        """Retrieves a specific incident including its full history for the detail modal."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, incident_num, status, apps, error_signature, logs, matched_rules, ai_proposal, kb_applied, created_at, updated_at, history
+                    SELECT id, incident_num, status, apps, error_signature, logs, matched_rules, ai_proposal, kb_applied, created_at, updated_at, history, occurrences_count
                     FROM incidents
                     WHERE id = ?
                 """, (incident_id,))
@@ -483,23 +372,24 @@ class Database:
                         "status": row["status"],
                         "apps": row["apps"].split(",") if row["apps"] else [],
                         "error_signature": row["error_signature"],
-                        "logs": json.loads(row["logs"]),
-                        "matched_rules": json.loads(row["matched_rules"]),
+                        "logs": json.loads(row["logs"]) if row["logs"] else {},
+                        "matched_rules": json.loads(row["matched_rules"]) if row["matched_rules"] else [],
                         "ai_proposal": row["ai_proposal"],
                         "kb_applied": json.loads(row["kb_applied"]) if row["kb_applied"] else None,
                         "created_at": row["created_at"],
                         "updated_at": row["updated_at"],
+                        "occurrences_count": row["occurrences_count"] if "occurrences_count" in row.keys() else 1,
                         "history": json.loads(row["history"]) if row["history"] else []
                     }
                 return None
         except Exception as e:
-            logger.error(f"❌ Error al obtener incidente {incident_id} de la base de datos: {e}", exc_info=True)
+            logger.error(f"❌ Error al obtener incidente {incident_id}: {e}", exc_info=True)
             return None
 
     def resolve_incident(self, incident_id: int, kb_rule: Dict[str, Any]) -> bool:
         """Resolves an incident by linking it to an applied Knowledge Base rule."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     UPDATE incidents
@@ -522,40 +412,49 @@ class Database:
             return False
 
     def auto_close_inactive_incidents(self, timeout_seconds: int = 7 * 24 * 3600) -> int:
-        """Closes open/resolved incidents that have not recurred for more than a week."""
+        """Closes open incidents inactive for >1 week and purges closed incidents older than 30 days."""
         cutoff_time = int(time.time()) - timeout_seconds
+        purge_time = int(time.time()) - (30 * 24 * 3600)
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
+                # 1. Close inactive open incidents
                 cursor.execute("""
                     UPDATE incidents
                     SET status = 'CERRADA',
                         updated_at = ?
                     WHERE status = 'ABIERTA' AND updated_at < ?
                 """, (int(time.time()), cutoff_time))
+                closed_count = cursor.rowcount
+                
+                # 2. Purge very old closed incidents (>30 days) to keep database compact
+                cursor.execute("DELETE FROM incidents WHERE status = 'CERRADA' AND updated_at < ?", (purge_time,))
+                purged_count = cursor.rowcount
+                
                 conn.commit()
-                rows_affected = cursor.rowcount
-            if rows_affected > 0:
-                logger.info(f"⏰ [Auto-Cierre] {rows_affected} incidentes inactivos cerrados automáticamente por inactividad de 1 semana.")
-            return rows_affected
+                cursor.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                
+            if closed_count > 0:
+                logger.info(f"⏰ [Auto-Cierre] {closed_count} incidentes inactivos cerrados automáticamente.")
+            if purged_count > 0:
+                logger.info(f"🗑️ [Auto-Purga] {purged_count} incidentes antiguos (>30 días) eliminados de la base de datos.")
+            return closed_count
         except Exception as e:
-            logger.error(f"❌ Error en el auto-cierre de incidentes: {e}", exc_info=True)
+            logger.error(f"❌ Error en auto-cierre/purga de incidentes: {e}", exc_info=True)
             return 0
 
     def delete_incident(self, incident_id: int) -> bool:
         """Deletes a specific incident from the database."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM incidents WHERE id = ?", (incident_id,))
                 conn.commit()
                 rows_affected = cursor.rowcount
             if rows_affected > 0:
-                logger.info(f"🗑️ Incidente #{incident_id} eliminado de la base de datos.")
+                logger.info(f"🗑️ Incidente #{incident_id} eliminado.")
                 return True
-            else:
-                logger.warning(f"⚠️ Intento de eliminar incidente inexistente #{incident_id}.")
-                return False
+            return False
         except Exception as e:
             logger.error(f"❌ Error al eliminar incidente #{incident_id}: {e}", exc_info=True)
             return False
@@ -563,11 +462,12 @@ class Database:
     def delete_all_incidents(self) -> bool:
         """Deletes all incidents from the database."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM incidents")
                 conn.commit()
                 rows_affected = cursor.rowcount
+                cursor.execute("PRAGMA wal_checkpoint(PASSIVE)")
             logger.info(f"🗑️ Se han eliminado {rows_affected} incidentes del historial.")
             return True
         except Exception as e:
@@ -579,10 +479,9 @@ class Database:
     def get_kb_rules(self) -> List[Dict[str, Any]]:
         """Retrieves all Knowledge Base rules from SQLite."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
-                # Use PRAGMA to check if action column exists safely, but we added migration in init_db
                 cursor.execute("SELECT id, pattern, description, cause, solution, commands, action, is_regex FROM kb_rules ORDER BY id DESC")
                 rows = cursor.fetchall()
                 
@@ -600,23 +499,19 @@ class Database:
                     })
                 return rules
         except Exception as e:
-            logger.error(f"❌ Error al obtener reglas de conocimiento desde SQLite: {e}", exc_info=True)
+            logger.error(f"❌ Error al obtener reglas de conocimiento: {e}", exc_info=True)
             return []
 
     def save_kb_rule(self, pattern: str, description: str, cause: str, solution: str, commands: str, action: str = "ALERT", original_pattern: Optional[str] = None, is_regex: bool = False) -> bool:
         """Saves (inserts or updates) a Knowledge Base rule in SQLite."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
                 search_pattern = original_pattern if original_pattern else pattern
-                
-                # Check if it exists
                 cursor.execute("SELECT id FROM kb_rules WHERE LOWER(pattern) = LOWER(?)", (search_pattern,))
                 row = cursor.fetchone()
                 
                 if row:
-                    # Update
                     rule_id = row[0]
                     cursor.execute("""
                         UPDATE kb_rules
@@ -630,7 +525,6 @@ class Database:
                         WHERE id = ?
                     """, (pattern, description, cause, solution, commands, action, int(is_regex), rule_id))
                 else:
-                    # Insert
                     cursor.execute("""
                         INSERT INTO kb_rules (pattern, description, cause, solution, commands, action, is_regex)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -638,20 +532,20 @@ class Database:
                 conn.commit()
             return True
         except Exception as e:
-            logger.error(f"❌ Error al guardar regla de conocimiento en SQLite: {e}", exc_info=True)
+            logger.error(f"❌ Error al guardar regla de conocimiento: {e}", exc_info=True)
             return False
 
     def delete_kb_rule(self, pattern: str) -> bool:
         """Deletes a Knowledge Base rule by its pattern name."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM kb_rules WHERE LOWER(pattern) = LOWER(?)", (pattern,))
                 conn.commit()
                 rows_affected = cursor.rowcount
             return rows_affected > 0
         except Exception as e:
-            logger.error(f"❌ Error al eliminar regla de conocimiento '{pattern}' de SQLite: {e}", exc_info=True)
+            logger.error(f"❌ Error al eliminar regla de conocimiento '{pattern}': {e}", exc_info=True)
             return False
 
     # --- SETTINGS SQLite CRUD ---
@@ -659,7 +553,7 @@ class Database:
     def get_setting(self, key: str, default: str = "") -> str:
         """Retrieves a setting by key."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
                 row = cursor.fetchone()
@@ -667,13 +561,13 @@ class Database:
                     return row[0]
                 return default
         except Exception as e:
-            logger.error(f"❌ Error al obtener ajuste '{key}' de SQLite: {e}", exc_info=True)
+            logger.error(f"❌ Error al obtener ajuste '{key}': {e}", exc_info=True)
             return default
 
     def set_setting(self, key: str, value: str) -> bool:
         """Saves a setting."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO settings (key, value)
@@ -683,6 +577,5 @@ class Database:
                 conn.commit()
             return True
         except Exception as e:
-            logger.error(f"❌ Error al guardar ajuste '{key}' en SQLite: {e}", exc_info=True)
+            logger.error(f"❌ Error al guardar ajuste '{key}': {e}", exc_info=True)
             return False
-

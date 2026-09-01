@@ -1,13 +1,8 @@
 # AI DevOps Log Monitor & Analyzer Bot
-# This application intelligently monitors logs managed in Grafana Loki,
-# analyzes critical errors and anomalies using Meta Llama 3.3 (via Groq),
+# This application intelligently monitors Docker container logs,
+# analyzes critical errors and anomalies using LLMs (Groq, Gemini, Ollama),
 # and delivers diagnostics, root-cause analyses, and resolution commands
 # directly to your Web UI dashboard.
-#
-# Bot de monitorización de logs de DevOps con IA. Analiza errores desde 
-# Loki, consulta soluciones mediante Llama 3.3, y muestra diagnósticos
-# accionables en su interfaz Web integrada.
-version: "3.8"
 
 services:
   ai-devops-bot:
@@ -15,6 +10,8 @@ services:
     container_name: ai-devops-bot
     restart: unless-stopped
     user: 1000:1000
+    group_add:
+      - "989"
     ports:
       - "8000:8000"
     env_file:
@@ -22,5 +19,8 @@ services:
     volumes:
       - /home/leif/docker/configs/ai-devops-bot/data:/app/data:z
       - /home/leif/docker/configs/ai-devops-bot/src:/app/src:z
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - DATABASE_PATH=/app/data/history.db
+      - LOG_SOURCE=docker
+      - DOCKER_SOCKET=/var/run/docker.sock

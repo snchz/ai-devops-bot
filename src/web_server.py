@@ -6,18 +6,16 @@ from typing import Dict, Any, List, Optional
 from src.logger import logger, METRICS
 from src.database import Database
 from src.config import Config
-from src.loki import LokiClient
 
 class WebServer:
     """Lightweight, fully asynchronous, dependency-free HTTP server for metrics, healthcheck, and Web UI REST APIs."""
     
-    def __init__(self, config: Config, db: Database):
+    def __init__(self, config: Config, db: Database, log_client: Any):
         self.config = config
         self.port = config.healthcheck_port
         self.db = db
-        self.loki = LokiClient(config)
+        self.log_client = log_client
         
-        # Absolute path to the web folder
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.web_dir = os.path.join(base_dir, "web")
         
@@ -38,7 +36,6 @@ class WebServer:
         """Processes an incoming HTTP connection asynchronously."""
         try:
             header_data = b""
-            # Read request headers (delimited by double CRLF)
             while True:
                 line = await reader.readline()
                 if not line:
@@ -63,7 +60,6 @@ class WebServer:
             method, raw_path = parts[0], parts[1]
             method = method.upper()
             
-            # Parse path and query parameters
             path = raw_path
             query_params = {}
             if "?" in raw_path:
@@ -73,38 +69,32 @@ class WebServer:
                         k, v = pair.split("=", 1)
                         query_params[urllib.parse.unquote(k)] = urllib.parse.unquote(v)
             
-            # Parse Content-Length for body reading
             content_length = 0
             for line in lines:
                 if line.lower().startswith("content-length:"):
                     try:
                         content_length = int(line.split(":")[1].strip())
-                        # Safety limit to prevent memory overflow (OOM)
                         if content_length > 2 * 1024 * 1024:
                             content_length = 2 * 1024 * 1024
                     except ValueError:
                         pass
                         
-            # Read body if content length exists
             body = b""
             if content_length > 0:
                 try:
                     body = await reader.readexactly(content_length)
                 except Exception as body_err:
-                    logger.error(f"Error al leer el cuerpo de la petición: {body_err}")
+                    logger.error(f"Error al leer cuerpo de petición: {body_err}")
             
-            # Handle CORS preflight
             if method == "OPTIONS":
                 writer.write(self._make_response(204, "No Content", "text/plain", b""))
                 await writer.drain()
                 return
 
-            # Route requests
             await self.route_request(writer, method, path, query_params, body)
             
         except Exception as e:
             logger.error(f"Error procesando petición web: {e}", exc_info=True)
-            # Fallback error response
             try:
                 err_res = self._make_response(500, "Internal Server Error", "application/json", b'{"error": "Internal Server Error"}')
                 writer.write(err_res)
@@ -121,7 +111,7 @@ class WebServer:
     async def route_request(self, writer: asyncio.StreamWriter, method: str, path: str, query_params: Dict[str, str], body: bytes):
         """Asynchronous router for files and APIs."""
         
-        # 1. Healthcheck & Metrics (100% backward compatible)
+        # 1. Healthcheck & Metrics
         if path == "/healthz" and method == "GET":
             resp_body = b'{"status": "healthy"}'
             writer.write(self._make_response(200, "OK", "application/json", resp_body))
@@ -149,7 +139,6 @@ class WebServer:
             return
             
         elif path == "/api/version" and method == "GET":
-            # Attempt to read VERSION file in root directory
             version = "unknown"
             root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             version_path = os.path.join(root_dir, "VERSION")
@@ -166,13 +155,27 @@ class WebServer:
             
         # 2. REST API: INCIDENTS HISTORY
         elif path == "/api/incidents" and method == "GET":
-            limit = int(query_params.get("limit", "100"))
+            limit = int(query_params.get("limit", "50"))
             incidents = await asyncio.to_thread(self.db.get_incidents, limit)
             resp_body = json.dumps(incidents, ensure_ascii=False).encode("utf-8")
             writer.write(self._make_response(200, "OK", "application/json", resp_body))
             await writer.drain()
             return
             
+        elif path.startswith("/api/incidents/") and path.endswith("/detail") and method == "GET":
+            try:
+                incident_id = int(path.split("/")[-2])
+                incident = await asyncio.to_thread(self.db.get_incident, incident_id)
+                if incident:
+                    resp_body = json.dumps(incident, ensure_ascii=False).encode("utf-8")
+                    writer.write(self._make_response(200, "OK", "application/json", resp_body))
+                else:
+                    writer.write(self._make_response(404, "Not Found", "application/json", b'{"error": "Incident not found"}'))
+            except Exception as ex:
+                writer.write(self._make_response(500, "Internal Server Error", "application/json", f'{{"error": "{str(ex)}"}}'.encode("utf-8")))
+            await writer.drain()
+            return
+
         elif path.startswith("/api/incidents/") and path.endswith("/context") and method == "GET":
             try:
                 incident_id = int(path.split("/")[-2])
@@ -183,15 +186,12 @@ class WebServer:
                     writer.write(self._make_response(404, "Not Found", "application/json", resp_body))
                 else:
                     app_name = incident["apps"][0] if incident["apps"] else ""
-                    # Try to extract the actual timestamp of the log event from the stored logs dictionary
                     target_ts_ns = None
                     if isinstance(incident.get("logs"), dict):
-                        # Try first with the main app name
                         if app_name and app_name in incident["logs"]:
                             app_logs = incident["logs"][app_name]
                             if isinstance(app_logs, list) and len(app_logs) > 0 and isinstance(app_logs[0], dict):
                                 target_ts_ns = app_logs[0].get("timestamp_ns")
-                        # Fallback to any app log timestamp in the dictionary
                         if target_ts_ns is None:
                             for logs_list in incident["logs"].values():
                                 if isinstance(logs_list, list) and len(logs_list) > 0 and isinstance(logs_list[0], dict):
@@ -200,10 +200,9 @@ class WebServer:
                                         break
                     
                     if target_ts_ns is None:
-                        # Fallback to created_at timestamp
                         target_ts_ns = int(incident["created_at"]) * 1_000_000_000
                     
-                    logs = await self.loki.fetch_context_logs(app_name, target_ts_ns, window_minutes=5)
+                    logs = await self.log_client.fetch_context_logs(app_name, target_ts_ns, window_minutes=5)
                     resp_body = json.dumps(logs, ensure_ascii=False).encode("utf-8")
                     writer.write(self._make_response(200, "OK", "application/json", resp_body))
             except ValueError:
@@ -216,7 +215,6 @@ class WebServer:
             return
             
         elif path.startswith("/api/incidents/") and path.endswith("/resolve") and method == "POST":
-            # Resolve incident endpoint
             try:
                 incident_id = int(path.split("/")[-2])
                 payload = json.loads(body.decode("utf-8"))
@@ -250,7 +248,6 @@ class WebServer:
             return
             
         elif path.startswith("/api/incidents/") and method == "DELETE":
-            # Check if deleting all
             if path == "/api/incidents/all":
                 success = await asyncio.to_thread(self.db.delete_all_incidents)
                 if success:
@@ -262,7 +259,6 @@ class WebServer:
                 await writer.drain()
                 return
 
-            # Extract Incident ID
             try:
                 incident_id = int(path.split("/")[-1])
                 success = await asyncio.to_thread(self.db.delete_incident, incident_id)
@@ -275,12 +271,14 @@ class WebServer:
             except ValueError:
                 resp_body = b'{"error": "Invalid incident ID"}'
                 writer.write(self._make_response(400, "Bad Request", "application/json", resp_body))
+            except Exception as ex:
+                resp_body = f'{{"error": "{str(ex)}"}}'.encode("utf-8")
+                writer.write(self._make_response(500, "Internal Server Error", "application/json", resp_body))
             await writer.drain()
             return
 
         # 3. REST API: SETTINGS
         elif path == "/api/settings" and method == "GET":
-            # Return specific configuration values
             settings = {
                 "poll_interval_minutes": float(await asyncio.to_thread(self.db.get_setting, "poll_interval_minutes", "5.0"))
             }
@@ -303,7 +301,7 @@ class WebServer:
             await writer.drain()
             return
 
-        # 4. REST API: KNOWLEDGE BASE RULES (Consolidated SQLite CRUD)
+        # 4. REST API: KNOWLEDGE BASE RULES
         elif path == "/api/kb" and method == "GET":
             rules = await asyncio.to_thread(self.db.get_kb_rules)
             resp_body = json.dumps(rules, ensure_ascii=False).encode("utf-8")
@@ -344,7 +342,6 @@ class WebServer:
             return
             
         elif path == "/api/kb" and method == "DELETE":
-            # Extract target pattern from query params
             pattern_to_del = query_params.get("pattern", "").strip()
             if not pattern_to_del:
                 resp_body = b'{"error": "pattern parameter is required"}'
@@ -362,13 +359,12 @@ class WebServer:
             await writer.drain()
             return
 
-        # 4. STATIC FILE WEB SERVER
+        # 5. STATIC FILE WEB SERVER
         else:
             file_path_rel = path.lstrip("/")
             if not file_path_rel or file_path_rel == "":
                 file_path_rel = "index.html"
                 
-            # Sanitize to prevent directory traversal
             clean_path = os.path.normpath(file_path_rel)
             if clean_path.startswith("..") or os.path.isabs(clean_path):
                 writer.write(self._make_response(403, "Forbidden", "text/plain", b"Access Forbidden"))
