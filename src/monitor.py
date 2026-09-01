@@ -3,7 +3,7 @@ import json
 import time
 import asyncio
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple, Final
 from src.config import Config
 from src.docker_client import DockerClient
 from src.knowledge_base import KnowledgeBase
@@ -12,33 +12,34 @@ from src.database import Database
 from src.web_server import WebServer
 from src.logger import logger, METRICS
 
+INFO_LEVELS: Final[set] = {"info", "debug", "trace", "informational"}
+ERROR_LEVELS: Final[set] = {"error", "warn", "warning", "fatal", "panic", "crit", "critical", "emerg", "emergency"}
+
+
 class LogMonitor:
     """Orchestrator to poll Docker container logs, process errors, and get AI suggestions asynchronously."""
-    
-    def __init__(self, config: Config):
-        self.config = config
-        self.db = Database(config.db_path)
-        self.kb = KnowledgeBase(self.db)
-        self.gemini = GeminiClient(config)
-        self.log_client = DockerClient(config)
+
+    def __init__(self, config: Config) -> None:
+        self.config: Config = config
+        self.db: Database = Database(config.db_path)
+        self.kb: KnowledgeBase = KnowledgeBase(self.db)
+        self.gemini: GeminiClient = GeminiClient(config)
+        self.log_client: DockerClient = DockerClient(config)
         self.last_processed_timestamp_ns: Optional[int] = None
-        self.sent_alerts = {}  # In-memory mapping of alert_key -> timestamp
+        self.sent_alerts: Dict[str, float] = {}
 
     def _is_ignored_level(self, log: Dict[str, Any]) -> bool:
         """Determines if a log item has an informational/debug level and should be ignored."""
-        message = log.get("message", "").strip()
-        labels = log.get("labels", {})
-
-        info_levels = {"info", "debug", "trace", "informational"}
-        error_levels = {"error", "warn", "warning", "fatal", "panic", "crit", "critical", "emerg", "emergency"}
+        message: str = log.get("message", "").strip()
+        labels: Dict[str, Any] = log.get("labels", {})
 
         # 1. Check labels
         for k, v in labels.items():
             if k.lower() in ("level", "severity", "loglevel"):
                 v_lower = str(v).lower()
-                if v_lower in info_levels:
+                if v_lower in INFO_LEVELS:
                     return True
-                if v_lower in error_levels:
+                if v_lower in ERROR_LEVELS:
                     return False
 
         # 2. Try JSON parsing
@@ -48,9 +49,9 @@ class LogMonitor:
                 for key in ("level", "severity", "loglevel"):
                     if key in parsed_json:
                         val = str(parsed_json[key]).lower()
-                        if val in error_levels:
+                        if val in ERROR_LEVELS:
                             return False
-                        if val in info_levels:
+                        if val in INFO_LEVELS:
                             return True
         except json.JSONDecodeError:
             pass
@@ -61,39 +62,37 @@ class LogMonitor:
         for key in ("level", "severity", "loglevel"):
             if key in logfmt_matches:
                 val = logfmt_matches[key].strip("'\"").lower()
-                if val in error_levels:
+                if val in ERROR_LEVELS:
                     return False
-                if val in info_levels:
+                if val in INFO_LEVELS:
                     return True
 
         # 4. Bracket style: [INFO], [DEBUG]
-        bracket_pattern = r'\[(info|debug|trace|informational)\]'
-        if re.search(bracket_pattern, message, re.IGNORECASE):
-            has_error_bracket = re.search(r'\[(error|warn|warning|fatal|panic|crit|critical|emerg|emergency)\]', message, re.IGNORECASE)
-            if not has_error_bracket:
+        if re.search(r'\[(info|debug|trace|informational)\]', message, re.IGNORECASE):
+            has_error = re.search(r'\[(error|warn|warning|fatal|panic|crit|critical|emerg|emergency)\]', message, re.IGNORECASE)
+            if not has_error:
                 return True
 
         # 5. Standard prefix style: INFO: or DEBUG:
-        prefix_pattern = r'\b(info|debug|trace)\s*:\s+'
-        if re.search(prefix_pattern, message, re.IGNORECASE):
+        if re.search(r'\b(info|debug|trace)\s*:\s+', message, re.IGNORECASE):
             has_error_prefix = re.search(r'\b(error|warn|warning|fatal|panic|crit|critical)\s*:\s+', message, re.IGNORECASE)
             if not has_error_prefix:
                 return True
 
         return False
 
-    async def establish_baseline(self):
+    async def establish_baseline(self) -> None:
         """Initializes the baseline timestamp to the current time to avoid historical spam."""
         logger.info("Estableciendo línea base de logs para evitar falsos positivos históricos...")
-        lookback_ns = 2 * 60 * 1_000_000_000  # 2 minutes lookback
-        start_time_ns = time.time_ns() - lookback_ns
-        
+        lookback_ns: int = 2 * 60 * 1_000_000_000
+        start_time_ns: int = time.time_ns() - lookback_ns
+
         try:
             logs = await self.log_client.fetch_logs(start_ns=start_time_ns, limit=200)
             if logs:
-                max_ts = max(log["timestamp_ns"] for log in logs)
+                max_ts: int = max(log["timestamp_ns"] for log in logs)
                 self.last_processed_timestamp_ns = max_ts
-                dt_str = datetime.fromtimestamp(max_ts / 1_000_000_000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                dt_str: str = datetime.fromtimestamp(max_ts / 1_000_000_000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 logger.info(f"Línea base establecida. Ignorando logs anteriores a: {dt_str}")
             else:
                 self.last_processed_timestamp_ns = time.time_ns()
@@ -104,15 +103,15 @@ class LogMonitor:
 
     def group_and_deduplicate(self, logs: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
         """Groups logs by container and combines identical messages."""
-        grouped = {}
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
         for log in logs:
             app = log["labels"].get("container_name", "sistema")
             if app not in grouped:
                 grouped[app] = []
-                
+
             msg = log["message"]
             log_time = log.get("timestamp_ns", 0)
-            
+
             found_exact = False
             for item in grouped[app]:
                 if item["message"] == msg:
@@ -121,7 +120,7 @@ class LogMonitor:
                     item["timestamp_ns"] = max(item.get("timestamp_ns", 0), log_time)
                     found_exact = True
                     break
-                    
+
             if not found_exact:
                 grouped[app].append({
                     "message": msg,
@@ -132,163 +131,142 @@ class LogMonitor:
                 })
         return grouped
 
-    async def run_poll_cycle(self):
+    async def run_poll_cycle(self) -> None:
         """Runs a single polling and processing cycle asynchronously."""
         logger.info("Iniciando ciclo de sondeo de logs en Docker...")
         METRICS["cycles"] += 1
-        
-        # Auto-closure and auto-purge check for inactive incidents
+
         await asyncio.to_thread(self.db.auto_close_inactive_incidents)
-        
-        query_start_ns = self.last_processed_timestamp_ns or (time.time_ns() - 60 * 1_000_000_000)
-        fetched_logs = await self.log_client.fetch_logs(start_ns=query_start_ns)
-        
-        total_fetched = len(fetched_logs) if fetched_logs else 0
-        logger.info(f"Sondeo completado. Logs recuperados en el búfer temporal: {total_fetched}")
-        
-        if not fetched_logs:
+        new_logs = await self._fetch_new_candidate_logs()
+        if not new_logs:
             return
 
-        new_logs = []
-        for log in fetched_logs:
-            if log["timestamp_ns"] <= self.last_processed_timestamp_ns:
-                continue
-            if self._is_ignored_level(log):
-                continue
-            new_logs.append(log)
-        
-        if not new_logs:
-            logger.info("No hay nuevos logs de error/alerta desde la última iteración.")
+        filtered_groups = self._apply_cooldown_filter(self.group_and_deduplicate(new_logs))
+        if not filtered_groups:
+            self._advance_baseline(new_logs)
             return
-            
-        logger.info(f"Detectados {len(new_logs)} nuevos logs de error.")
-        METRICS["errors_detected"] += len(new_logs)
-        
-        # 1. Group and deduplicate in memory
-        grouped_logs = self.group_and_deduplicate(new_logs)
-        
-        # 2. Filter out logs under cooldown
-        now = time.time()
-        filtered_grouped_logs = {}
-        skipped_count = 0
-        
+
+        logs_for_ai, ignored_logs, matched_rules = self._match_rules_and_classify(filtered_groups)
+        await self._process_and_save_incidents(logs_for_ai, ignored_logs, matched_rules)
+        self._advance_baseline(new_logs)
+
+    async def _fetch_new_candidate_logs(self) -> List[Dict[str, Any]]:
+        query_start_ns = self.last_processed_timestamp_ns or (time.time_ns() - 60 * 1_000_000_000)
+        fetched = await self.log_client.fetch_logs(start_ns=query_start_ns)
+        if not fetched:
+            return []
+
+        candidates = [
+            l for l in fetched
+            if (not self.last_processed_timestamp_ns or l["timestamp_ns"] > self.last_processed_timestamp_ns)
+            and not self._is_ignored_level(l)
+        ]
+        if candidates:
+            logger.info(f"Detectados {len(candidates)} nuevos logs de error.")
+            METRICS["errors_detected"] += len(candidates)
+        return candidates
+
+    def _apply_cooldown_filter(
+        self,
+        grouped_logs: Dict[str, List[Dict[str, Any]]]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        now: float = time.time()
+        filtered: Dict[str, List[Dict[str, Any]]] = {}
+
         for app, items in grouped_logs.items():
-            filtered_items = []
+            valid_items = []
             for item in items:
-                msg_snippet = item["message"][:80].strip()
-                cooldown_key = f"{app}:{msg_snippet}"
-                
-                last_sent = self.sent_alerts.get(cooldown_key, 0.0)
+                key = f"{app}:{item['message'][:80].strip()}"
+                last_sent = self.sent_alerts.get(key, 0.0)
                 if now - last_sent < self.config.cooldown_seconds:
-                    skipped_count += item["count"]
-                    logger.info(f"🔕 [Cooldown] Alerta omitida para {app}: '{msg_snippet[:40]}...' (En enfriamiento).")
+                    logger.info(f"🔕 [Cooldown] Alerta omitida para {app} (En enfriamiento).")
                     continue
-                
-                self.sent_alerts[cooldown_key] = now
-                filtered_items.append(item)
-                
-            if filtered_items:
-                filtered_grouped_logs[app] = filtered_items
-                
-        # Clean up expired cooldowns to save memory
+                self.sent_alerts[key] = now
+                valid_items.append(item)
+            if valid_items:
+                filtered[app] = valid_items
+
         self.sent_alerts = {k: ts for k, ts in self.sent_alerts.items() if now - ts < self.config.cooldown_seconds}
-        
-        if not filtered_grouped_logs:
-            logger.info(f"Todos los nuevos logs ({len(new_logs)}) están en enfriamiento. Ciclo omitido.")
-            max_ts = max(log["timestamp_ns"] for log in new_logs)
-            self.last_processed_timestamp_ns = max_ts
-            return
-            
-        # 3. Match unique logs with local Knowledge Base rules
-        logs_for_ai = {}
-        ignored_logs_to_save = []
-        matched_rules_for_ai = []
-        
+        return filtered
+
+    def _match_rules_and_classify(
+        self,
+        filtered_groups: Dict[str, List[Dict[str, Any]]]
+    ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Tuple[str, Dict[str, Any], List[Dict[str, Any]]]], List[Dict[str, Any]]]:
+        logs_for_ai: Dict[str, List[Dict[str, Any]]] = {}
+        ignored_logs: List[Tuple[str, Dict[str, Any], List[Dict[str, Any]]]] = []
+        matched_rules: List[Dict[str, Any]] = []
         rules = self.kb.load_rules()
-        
-        for app, items in filtered_grouped_logs.items():
+
+        for app, items in filtered_groups.items():
             for item in items:
                 msg_lower = item["message"].lower()
-                item_matched_rules = []
-                is_ignored = False
-                
-                for rule in rules:
-                    pattern = rule.get("pattern", "").lower()
-                    if pattern and pattern in msg_lower:
-                        item_matched_rules.append(rule)
-                        if rule.get("action", "ALERT").upper() == "IGNORE":
-                            is_ignored = True
-                            
+                matched = [r for r in rules if r.get("pattern", "").lower() in msg_lower and r.get("pattern")]
+                is_ignored = any(r.get("action", "ALERT").upper() == "IGNORE" for r in matched)
+
                 if is_ignored:
-                    ignored_logs_to_save.append((app, item, item_matched_rules))
+                    ignored_logs.append((app, item, matched))
                 else:
-                    if app not in logs_for_ai:
-                        logs_for_ai[app] = []
-                    logs_for_ai[app].append(item)
-                    for r in item_matched_rules:
-                        if r not in matched_rules_for_ai:
-                            matched_rules_for_ai.append(r)
-                            
-        # 4. Analyze logs with AI
-        analysis = None
+                    logs_for_ai.setdefault(app, []).append(item)
+                    for r in matched:
+                        if r not in matched_rules:
+                            matched_rules.append(r)
+
+        return logs_for_ai, ignored_logs, matched_rules
+
+    async def _process_and_save_incidents(
+        self,
+        logs_for_ai: Dict[str, List[Dict[str, Any]]],
+        ignored_logs: List[Tuple[str, Dict[str, Any], List[Dict[str, Any]]]],
+        matched_rules: List[Dict[str, Any]]
+    ) -> None:
+        analysis: Optional[str] = None
         if logs_for_ai:
             try:
-                analysis = await self.gemini.analyze_logs(logs_for_ai, matched_rules_for_ai)
+                analysis = await self.gemini.analyze_logs(logs_for_ai, matched_rules)
             except Exception as ai_err:
                 logger.error(f"Excepción al invocar el proveedor de IA: {ai_err}")
-                analysis = None
-            
+
             if not analysis:
-                analysis = (
-                    "⚠️ **[ERROR DE PROVEEDOR DE IA]**\n\n"
-                    "El bot no pudo obtener un diagnóstico automatizado de la IA.\n"
-                    "Verifica tu `AI_PROVIDER` y `GROQ_API_KEY` o `GEMINI_API_KEY` en el archivo `.env`."
-                )
+                analysis = "⚠️ **[ERROR DE PROVEEDOR DE IA]**\n\nNo se pudo obtener diagnóstico automatizado."
             else:
                 METRICS["alerts_sent"] += 1
-            
-        # 5. Save incidents to database
-        for app, items in logs_for_ai.items():
-            for item in items:
-                await asyncio.to_thread(self.db.register_or_recur_incident, app, item, matched_rules_for_ai, analysis)
-                
-        for app, item, item_rules in ignored_logs_to_save:
-            ignore_analysis = "🔇 **[AUTO-RESUELTO]**\n\nIncidencia silenciada automáticamente por Regla de Conocimiento (Acción: Ignorar)."
-            await asyncio.to_thread(self.db.register_or_recur_incident, app, item, item_rules, ignore_analysis)
-            
-        max_ts = max(log["timestamp_ns"] for log in new_logs)
-        self.last_processed_timestamp_ns = max_ts
-        logger.info(f"Ciclo completado. Último timestamp: {max_ts}")
 
-    async def polling_loop(self):
+            for app, items in logs_for_ai.items():
+                for item in items:
+                    await asyncio.to_thread(self.db.register_or_recur_incident, app, item, matched_rules, analysis)
+
+        for app, item, item_rules in ignored_logs:
+            ignore_note = "🔇 **[AUTO-RESUELTO]**\n\nIncidencia silenciada automáticamente por Regla de Conocimiento."
+            await asyncio.to_thread(self.db.register_or_recur_incident, app, item, item_rules, ignore_note)
+
+    def _advance_baseline(self, logs: List[Dict[str, Any]]) -> None:
+        if logs:
+            max_ts = max(log["timestamp_ns"] for log in logs)
+            self.last_processed_timestamp_ns = max_ts
+
+    async def polling_loop(self) -> None:
         """Infinite polling cycle task."""
         while True:
             try:
                 await self.run_poll_cycle()
             except Exception as e:
                 logger.error(f"Excepción en ciclo de monitoreo: {e}", exc_info=True)
-                
-            poll_interval_minutes = await asyncio.to_thread(self.db.get_setting, "poll_interval_minutes", "5.0")
-            try:
-                poll_interval_seconds = int(float(poll_interval_minutes) * 60)
-            except ValueError:
-                poll_interval_seconds = 300
-                
-            logger.info(f"Durmiendo el proceso durante {poll_interval_seconds} segundos ({(poll_interval_seconds/60.0):.2f} min)...")
-            await asyncio.sleep(poll_interval_seconds)
 
-    async def start(self):
-        """Starts all concurrent background tasks using asyncio."""
-        logger.info(f"Iniciando Bot de Monitoreo de Logs de Docker con {self.config.ai_provider}...")
-        
+            logger.info(f"Esperando {self.config.poll_interval_seconds} segundos antes del siguiente ciclo de sondeo...")
+            await asyncio.sleep(self.config.poll_interval_seconds)
+
+    async def start(self) -> None:
+        """Starts background tasks for logging, web server, and telemetry."""
+        logger.info("Iniciando Log Analyzer & DevOps Bot...")
         await self.establish_baseline()
-            
-        polling_task = asyncio.create_task(self.polling_loop())
-        tasks = [polling_task]
-        
-        if self.config.healthcheck_port:
-            web_server = WebServer(self.config, self.db, self.log_client)
-            web_task = asyncio.create_task(web_server.start())
-            tasks.append(web_task)
-            
-        await asyncio.gather(*tasks)
+
+        server = WebServer(self.config, self.db, self.log_client)
+        server_task = asyncio.create_task(server.start())
+        monitor_task = asyncio.create_task(self.polling_loop())
+
+        try:
+            await asyncio.gather(server_task, monitor_task)
+        finally:
+            await self.log_client.close()
+            await self.gemini.close()
