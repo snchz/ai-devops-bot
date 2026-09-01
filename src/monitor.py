@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from src.config import Config
 from src.docker_client import DockerClient
-from src.loki import LokiClient
 from src.knowledge_base import KnowledgeBase
 from src.gemini import GeminiClient
 from src.database import Database
@@ -14,22 +13,14 @@ from src.web_server import WebServer
 from src.logger import logger, METRICS
 
 class LogMonitor:
-    """Orchestrator to poll Docker/Loki, process logs, and get AI suggestions asynchronously."""
+    """Orchestrator to poll Docker container logs, process errors, and get AI suggestions asynchronously."""
     
     def __init__(self, config: Config):
         self.config = config
         self.db = Database(config.db_path)
         self.kb = KnowledgeBase(self.db)
         self.gemini = GeminiClient(config)
-        
-        # Select log ingestion client based on configuration
-        if config.log_source == "docker":
-            self.log_client = DockerClient(config)
-            logger.info("📡 Modo de ingestión de logs: Conexión directa a Docker Socket.")
-        else:
-            self.log_client = LokiClient(config)
-            logger.info("📡 Modo de ingestión de logs: Grafana Loki HTTP API.")
-            
+        self.log_client = DockerClient(config)
         self.last_processed_timestamp_ns: Optional[int] = None
         self.sent_alerts = {}  # In-memory mapping of alert_key -> timestamp
 
@@ -106,7 +97,7 @@ class LogMonitor:
                 logger.info(f"Línea base establecida. Ignorando logs anteriores a: {dt_str}")
             else:
                 self.last_processed_timestamp_ns = time.time_ns()
-                logger.info(f"No se encontraron logs recientes. Línea base fijada al tiempo actual.")
+                logger.info("No se encontraron logs recientes. Línea base fijada al tiempo actual.")
         except Exception as e:
             logger.error(f"Error al establecer línea base: {e}")
             self.last_processed_timestamp_ns = time.time_ns()
@@ -115,7 +106,7 @@ class LogMonitor:
         """Groups logs by container and combines identical messages."""
         grouped = {}
         for log in logs:
-            app = log["labels"].get("container_name", log["labels"].get("job", "sistema"))
+            app = log["labels"].get("container_name", "sistema")
             if app not in grouped:
                 grouped[app] = []
                 
@@ -143,7 +134,7 @@ class LogMonitor:
 
     async def run_poll_cycle(self):
         """Runs a single polling and processing cycle asynchronously."""
-        logger.info(f"Iniciando ciclo de sondeo de logs...")
+        logger.info("Iniciando ciclo de sondeo de logs en Docker...")
         METRICS["cycles"] += 1
         
         # Auto-closure and auto-purge check for inactive incidents
@@ -251,7 +242,7 @@ class LogMonitor:
                 analysis = (
                     "⚠️ **[ERROR DE PROVEEDOR DE IA]**\n\n"
                     "El bot no pudo obtener un diagnóstico automatizado de la IA.\n"
-                    "Verifica tu `AI_PROVIDER` y `API_KEY` en la configuración."
+                    "Verifica tu `AI_PROVIDER` y `GROQ_API_KEY` o `GEMINI_API_KEY` en el archivo `.env`."
                 )
             else:
                 METRICS["alerts_sent"] += 1
@@ -288,7 +279,7 @@ class LogMonitor:
 
     async def start(self):
         """Starts all concurrent background tasks using asyncio."""
-        logger.info(f"Iniciando Bot de Monitoreo de Logs ({self.config.log_source}) con {self.config.ai_provider}...")
+        logger.info(f"Iniciando Bot de Monitoreo de Logs de Docker con {self.config.ai_provider}...")
         
         await self.establish_baseline()
             

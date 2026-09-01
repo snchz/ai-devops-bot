@@ -1,6 +1,6 @@
 # AI DevOps Log Monitor & Analyzer Bot
-# This application intelligently monitors Docker container logs,
-# analyzes critical errors and anomalies using LLMs (Groq, Gemini, Ollama),
+# This application intelligently monitors Docker container logs directly via Docker Socket,
+# analyzes critical errors and anomalies using LLMs (Groq / Gemini / Ollama),
 # and delivers diagnostics, root-cause analyses, and resolution commands
 # directly to your Web UI dashboard.
 
@@ -22,5 +22,4 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - DATABASE_PATH=/app/data/history.db
-      - LOG_SOURCE=docker
       - DOCKER_SOCKET=/var/run/docker.sock
